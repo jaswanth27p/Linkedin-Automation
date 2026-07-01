@@ -1,0 +1,36 @@
+{
+  "name": "linkedin-automation",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "dev": "tsx src/cli.ts",
+    "start": "NODE_ENV=production tsx src/cli.ts",
+    "server": "NODE_ENV=production tsx src/server.ts"
+  },
+  "dependencies": {
+    "@mastra/agent-browser": "latest",
+    "@mastra/core": "latest",
+    "@mastra/libsql": "latest",
+    "@mastra/memory": "latest",
+    "bullmq": "latest",
+    "drizzle-orm": "latest",
+    "better-sqlite3": "latest",
+    "ioredis": "latest",
+    "zod": "latest",
+    "ink": "latest",
+    "react": "latest",
+    "ink-text-input": "latest",
+    "pino": "latest",
+    "pino-pretty": "latest"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "tsx": "latest",
+    "typescript": "latest",
+    "vitest": "latest"
+  }
+}
