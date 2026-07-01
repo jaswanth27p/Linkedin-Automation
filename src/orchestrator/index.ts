@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { Queue, Worker } from 'bullmq'
+import { Worker } from 'bullmq'
 import { redis } from '../queues/connection.ts'
 import { searchQueue } from '../queues/search.queue.ts'
 import { createEasyApplyWorker } from '../queues/easy-apply.queue.ts'
@@ -27,6 +27,14 @@ export class Orchestrator extends EventEmitter {
   async start(mode: RunMode) {
     if (this.isRunning) await this.stop()
 
+    if (mode === 'recent-search') {
+      await searchQueue.add('recent-search', { urls: this.deps.config.mustCheckUrls, requirements: this.deps.config.requirements, profileText: this.deps.profileText, postedWithinMinutes: this.deps.config.cron.recent.postedWithinMinutes })
+    } else if (mode === 'full-search') {
+      await searchQueue.add('full-search', { urls: this.deps.config.mustCheckUrls, requirements: this.deps.config.requirements, profileText: this.deps.profileText })
+    } else if (mode === 'full-run') {
+      await scheduleSearchJobs(searchQueue, this.deps.config)
+    }
+
     this.workers.push(createEasyApplyWorker(this.deps.profileText, this.deps.resumePath))
     this.workers.push(createExternalApplyWorker(this.deps.profileText, this.deps.resumePath))
 
@@ -39,14 +47,6 @@ export class Orchestrator extends EventEmitter {
       { connection: redis as any, concurrency: 1 }
     )
     this.workers.push(searchWorker)
-
-    if (mode === 'recent-search') {
-      await searchQueue.add('recent-search', { urls: this.deps.config.mustCheckUrls, requirements: this.deps.config.requirements, profileText: this.deps.profileText, postedWithinMinutes: this.deps.config.cron.recent.postedWithinMinutes })
-    } else if (mode === 'full-search') {
-      await searchQueue.add('full-search', { urls: this.deps.config.mustCheckUrls, requirements: this.deps.config.requirements, profileText: this.deps.profileText })
-    } else if (mode === 'full-run') {
-      await scheduleSearchJobs(searchQueue, this.deps.config)
-    }
 
     this.isRunning = true
     this.emit('started', mode)
