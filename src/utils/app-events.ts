@@ -6,6 +6,7 @@ export interface AppState {
   queueCounts: { search: number; easy: number; external: number }
   logs: string[]
   prompt: string | null
+  promptJobId: string | null
 }
 
 class AppEvents extends EventEmitter {
@@ -15,6 +16,7 @@ class AppEvents extends EventEmitter {
     queueCounts: { search: 0, easy: 0, external: 0 },
     logs: ['ready'],
     prompt: null,
+    promptJobId: null,
   }
 
   getState() { return { ...this.state } }
@@ -34,7 +36,7 @@ class AppEvents extends EventEmitter {
   start(mode: string) { this.setState({ mode }) }
   stop() { this.setState({ mode: 'idle', activeJob: null }) }
   answerPrompt(answer: string) {
-    this.setState({ prompt: null })
+    this.setState({ prompt: null, promptJobId: null })
     this.emit('answer', answer)
   }
 }

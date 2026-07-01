@@ -16,17 +16,14 @@ export async function main() {
   const profileText = await buildProfileText(config)
   const orchestrator = new Orchestrator({ profileText, resumePath: config.profileFiles.resume, config })
 
-  let currentPrompt: string | null = null
-
   appEvents.on('answer', async (answer: string) => {
-    const question = currentPrompt
-    currentPrompt = null
-    if (question) await rememberFact(question, answer)
-    orchestrator.emit('resume', answer)
+    const { prompt: currentPrompt, promptJobId: currentJobId } = appEvents.getState()
+    appEvents.setState({ prompt: null, promptJobId: null })
+    if (currentPrompt && currentJobId) await rememberFact(currentPrompt, answer)
+    orchestrator.emit('resume', { answer, jobId: currentJobId })
   })
 
   appEvents.subscribe((state) => {
-    currentPrompt = state.prompt ?? currentPrompt
     if (state.mode === 'idle') return
     if (orchestrator.isRunning) return
     orchestrator.start(state.mode as RunMode).catch(console.error)

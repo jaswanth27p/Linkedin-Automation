@@ -44,7 +44,7 @@ vi.mock('../../../src/utils/logger.ts', () => ({
 
 vi.mock('../../../src/utils/app-events.ts', () => {
   const handlers: Record<string, Array<(value: unknown) => void>> = {}
-  const state = { mode: 'idle', activeJob: null, prompt: null as string | null }
+  const state = { mode: 'idle', activeJob: null, prompt: null as string | null, promptJobId: null as string | null }
   return {
     appEvents: {
       on: vi.fn((event: string, cb: (value: unknown) => void) => {
@@ -62,17 +62,42 @@ vi.mock('../../../src/utils/app-events.ts', () => {
   }
 })
 
+let lastOrchestratorInstance: any
+
 vi.mock('../../../src/orchestrator/index.ts', () => {
   class FakeOrchestrator {
     isRunning = false
     on = vi.fn()
     start = vi.fn(() => Promise.resolve())
     stop = vi.fn(() => Promise.resolve())
+    emit = vi.fn()
   }
-  return { Orchestrator: FakeOrchestrator }
+  return {
+    Orchestrator: vi.fn(function () {
+      lastOrchestratorInstance = new FakeOrchestrator()
+      return lastOrchestratorInstance
+    }),
+  }
 })
 
 test('cli has required entry exports', async () => {
   const cli = await import('../../../src/cli.ts')
   expect(typeof cli.main).toBe('function')
+})
+
+test('answer event remembers fact and resumes exact job', async () => {
+  const { appEvents } = await import('../../../src/utils/app-events.ts')
+  const { Orchestrator } = await import('../../../src/orchestrator/index.ts')
+  const { rememberFact } = await import('../../../src/profile/memory.ts')
+
+  // Trigger the answer handler registered by main()
+  appEvents.setState({ prompt: 'salary expectation', promptJobId: 'job-1' })
+  const answerHandlers = (appEvents.on as any).mock.calls.filter(([event]: [string]) => event === 'answer')
+  expect(answerHandlers.length).toBeGreaterThan(0)
+  await answerHandlers[0][1]('100000 USD')
+
+  expect(appEvents.setState).toHaveBeenCalledWith({ prompt: null, promptJobId: null })
+  expect(rememberFact).toHaveBeenCalledWith('salary expectation', '100000 USD')
+
+  expect(lastOrchestratorInstance.emit).toHaveBeenCalledWith('resume', { answer: '100000 USD', jobId: 'job-1' })
 })

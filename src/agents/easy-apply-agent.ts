@@ -5,6 +5,8 @@ import { eq } from 'drizzle-orm'
 import { takeScreenshot } from '../utils/screenshot.ts'
 import { sanitizeId } from '../utils/path.ts'
 import { logToTui } from '../utils/logger.ts'
+import { appEvents } from '../utils/app-events.ts'
+import { NeedsInputError } from '../errors/needs-input-error.ts'
 import type { ApplyJobData } from '../queues/search.queue.ts'
 
 const easyAgent = createAgent({
@@ -19,13 +21,14 @@ const easyAgent = createAgent({
     4. Upload the resume PDF when asked.
     5. Submit the application.
     6. Return "applied" or throw a clear error.
+    If a question is not covered by the profile, throw "NEEDS_INPUT: <question>".
   `,
 })
 
 export async function runEasyApplyJob(job: ApplyJobData, profileText: string, resumePath: string) {
   const db = getDb()
   const screenshotPath = `data/screenshots/easy-${sanitizeId(job.id)}-${Date.now()}.png`
-  const updateJobStatus = (status: 'applied' | 'failed') =>
+  const updateJobStatus = (status: 'applied' | 'failed' | 'needs_input') =>
     db.update(jobs).set({ status, updatedAt: new Date() }).where(eq(jobs.id, job.id))
 
   logToTui(`easy apply started: ${job.title} @ ${job.company}`)
@@ -39,7 +42,11 @@ export async function runEasyApplyJob(job: ApplyJobData, profileText: string, re
         )
         await takeScreenshot(screenshotPath)
       } catch (err) {
-        await takeScreenshot(screenshotPath)
+        try {
+          await takeScreenshot(screenshotPath)
+        } catch (screenshotErr) {
+          logToTui(`screenshot failed: ${screenshotErr instanceof Error ? screenshotErr.message : String(screenshotErr)}`)
+        }
         throw err
       }
     })
@@ -55,6 +62,22 @@ export async function runEasyApplyJob(job: ApplyJobData, profileText: string, re
     logToTui(`easy apply submitted: ${job.title} @ ${job.company}`)
   } catch (err: unknown) {
     const errorMessage = err instanceof Error ? err.message : String(err)
+    const needsInputMatch = errorMessage.match(/NEEDS_INPUT:\s*(.+)/i)
+    if (needsInputMatch) {
+      const question = needsInputMatch[1].trim()
+      appEvents.setState({ prompt: question, promptJobId: job.id })
+      await db.insert(applications).values({
+        id: crypto.randomUUID(),
+        jobId: job.id,
+        status: 'needs_input',
+        error: question,
+        screenshotPath,
+      })
+      await updateJobStatus('needs_input')
+      logToTui(`easy apply needs input: ${question}`)
+      throw new NeedsInputError(question)
+    }
+
     await db.insert(applications).values({
       id: crypto.randomUUID(),
       jobId: job.id,

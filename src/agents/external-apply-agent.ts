@@ -6,6 +6,7 @@ import { takeScreenshot } from '../utils/screenshot.ts'
 import { NeedsInputError } from '../errors/needs-input-error.ts'
 import { sanitizeId } from '../utils/path.ts'
 import { logToTui } from '../utils/logger.ts'
+import { appEvents } from '../utils/app-events.ts'
 import type { ApplyJobData } from '../queues/search.queue.ts'
 
 const externalAgent = createAgent({
@@ -38,7 +39,11 @@ export async function runExternalApplyJob(job: ApplyJobData, profileText: string
         )
         await takeScreenshot(screenshotPath)
       } catch (err) {
-        await takeScreenshot(screenshotPath)
+        try {
+          await takeScreenshot(screenshotPath)
+        } catch (screenshotErr) {
+          logToTui(`screenshot failed: ${screenshotErr instanceof Error ? screenshotErr.message : String(screenshotErr)}`)
+        }
         throw err
       }
     })
@@ -56,6 +61,7 @@ export async function runExternalApplyJob(job: ApplyJobData, profileText: string
     const match = err.message?.match(/NEEDS_INPUT:\s*(.+)/i)
     if (match) {
       const question = match[1].trim()
+      appEvents.setState({ prompt: question, promptJobId: job.id })
       await db.insert(applications).values({
         id: crypto.randomUUID(),
         jobId: job.id,

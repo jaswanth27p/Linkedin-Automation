@@ -1,6 +1,7 @@
 import { test, expect, vi, beforeEach, type Mock } from 'vitest'
 import { runEasyApplyJob } from '../../../src/agents/easy-apply-agent.ts'
 import { applications, jobs } from '../../../src/db/schema.ts'
+import { NeedsInputError } from '../../../src/errors/needs-input-error.ts'
 
 const valuesMocks: Mock[] = []
 const setMocks: Mock[] = []
@@ -20,6 +21,7 @@ const mockDb = vi.hoisted(() => ({
 }))
 const mockTakeScreenshot = vi.hoisted(() => vi.fn())
 const mockLogToTui = vi.hoisted(() => vi.fn())
+const mockSetState = vi.hoisted(() => vi.fn())
 
 vi.mock('../../../src/mastra/index.ts', () => ({
   createAgent: () => mockAgent,
@@ -36,6 +38,10 @@ vi.mock('../../../src/utils/screenshot.ts', () => ({
 
 vi.mock('../../../src/utils/logger.ts', () => ({
   logToTui: mockLogToTui,
+}))
+
+vi.mock('../../../src/utils/app-events.ts', () => ({
+  appEvents: { setState: mockSetState, getState: vi.fn(() => ({})) },
 }))
 
 beforeEach(() => {
@@ -95,4 +101,33 @@ test('runEasyApplyJob records failed status and screenshot on error', async () =
   expect(setMocks[0]).toHaveBeenCalledWith(
     expect.objectContaining({ status: 'failed', updatedAt: expect.any(Date) }),
   )
+})
+
+test('runEasyApplyJob pauses with needs_input on NEEDS_INPUT error', async () => {
+  mockAgent.generate.mockRejectedValueOnce(new Error('NEEDS_INPUT: visa status'))
+
+  await expect(runEasyApplyJob(baseJob, 'profile text', '/tmp/resume.pdf')).rejects.toBeInstanceOf(NeedsInputError)
+
+  expect(mockSetState).toHaveBeenCalledWith({ prompt: 'visa status', promptJobId: baseJob.id })
+
+  expect(mockDb.insert).toHaveBeenCalledTimes(1)
+  expect(mockDb.insert).toHaveBeenCalledWith(applications)
+  expect(valuesMocks[0]).toHaveBeenCalledWith(
+    expect.objectContaining({ jobId: baseJob.id, status: 'needs_input', error: 'visa status' }),
+  )
+
+  expect(mockDb.update).toHaveBeenCalledTimes(1)
+  expect(mockDb.update).toHaveBeenCalledWith(jobs)
+  expect(setMocks[0]).toHaveBeenCalledWith(
+    expect.objectContaining({ status: 'needs_input', updatedAt: expect.any(Date) }),
+  )
+})
+
+test('runEasyApplyJob still throws original error when screenshot fails', async () => {
+  mockAgent.generate.mockRejectedValueOnce(new Error('form not found'))
+  mockTakeScreenshot.mockRejectedValueOnce(new Error('screenshot failed'))
+
+  await expect(runEasyApplyJob(baseJob, 'profile text', '/tmp/resume.pdf')).rejects.toThrow('form not found')
+
+  expect(mockLogToTui).toHaveBeenCalledWith(expect.stringContaining('screenshot failed'))
 })
