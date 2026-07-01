@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React from 'react'
 import { Box, Text, useInput } from 'ink'
 import { Menu } from './Menu.tsx'
 import { StatusPanel } from './StatusPanel.tsx'
@@ -8,19 +8,21 @@ import { useAppEvents } from './use-app-events.ts'
 
 export function App() {
   const { mode, activeJob, queueCounts, logs, prompt, start, stop, answerPrompt } = useAppEvents()
-  const [isPromptActive, setIsPromptActive] = useState(false)
-
-  useEffect(() => {
-    if (prompt) setIsPromptActive(true)
-  }, [prompt])
+  const isPromptActive = Boolean(prompt)
 
   const handleSubmit = (answer: string) => {
-    setIsPromptActive(false)
     answerPrompt(answer)
   }
 
   useInput((input, key) => {
-    if (key.escape) stop()
+    if (key.escape) {
+      if (isPromptActive) {
+        answerPrompt('')
+      } else {
+        stop()
+      }
+      return
+    }
     if (isPromptActive) return
     if (input === 'r') start('recent-search')
     if (input === 'f') start('full-search')
