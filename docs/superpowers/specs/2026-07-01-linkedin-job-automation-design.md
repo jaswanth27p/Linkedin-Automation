@@ -58,7 +58,8 @@ Single TypeScript project. One process runs the TUI, scheduler, queues, and work
 | TUI | Ink + React with layout boxes/borders (not line-by-line output) |
 | HTTP/API | Fastify (lightweight, optional API surface) |
 | Queues / scheduler | BullMQ + Redis |
-| AI / browser | Mastra (browser tool, agents, workflows, memory) |
+| AI / browser | Mastra (browser tool, agents, memory) |
+| LLM provider | OpenCode Go (`opencode-go/kimi-k2.7-code` default) |
 | Database | SQLite for local dev; Postgres for cloud |
 | ORM | Drizzle or Prisma |
 | Logging | pino |
@@ -75,6 +76,7 @@ Exports:
 - `requirements`: natural-language rules the agent uses to generate extra searches and filter jobs.
 - `cron`: `{ recent: { intervalMinutes, postedWithinMinutes }, full: { intervalMinutes } }`.
 - `concurrency`: `1` (single browser context).
+- `model`: Mastra model string; default `opencode-go/kimi-k2.7-code`.
 - `profileFiles`: paths to `profile.md` and `resume.pdf`.
 
 ### 2. Profile / Memory
