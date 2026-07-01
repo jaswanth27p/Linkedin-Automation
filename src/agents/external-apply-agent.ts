@@ -26,10 +26,16 @@ export async function runExternalApplyJob(job: ApplyJobData, profileText: string
 
   try {
     await withBrowser(async () => {
-      await externalAgent.generate(
-        `Apply to ${job.title} at ${job.company} via ${job.applyUrl}.\nProfile:\n${profileText}\nResume path: ${resumePath}`,
-        { memory: { resource: 'user', thread: 'external-apply-agent' } }
-      )
+      try {
+        await externalAgent.generate(
+          `Apply to ${job.title} at ${job.company} via ${job.applyUrl}.\nProfile:\n${profileText}\nResume path: ${resumePath}`,
+          { memory: { resource: 'user', thread: 'external-apply-agent' } }
+        )
+        await takeScreenshot(screenshotPath)
+      } catch (err) {
+        await takeScreenshot(screenshotPath)
+        throw err
+      }
     })
 
     await db.insert(applications).values({
@@ -41,7 +47,6 @@ export async function runExternalApplyJob(job: ApplyJobData, profileText: string
     })
     await db.update(jobs).set({ status: 'applied', updatedAt: new Date() }).where(eq(jobs.id, job.id))
   } catch (err: any) {
-    await takeScreenshot(screenshotPath)
     const match = err.message?.match(/NEEDS_INPUT:\s*(.+)/i)
     if (match) {
       const question = match[1].trim()
