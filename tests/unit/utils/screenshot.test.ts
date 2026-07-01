@@ -1,14 +1,19 @@
 import { test, expect, vi } from 'vitest'
 import { takeScreenshot } from '../../../src/utils/screenshot.ts'
 
+const { screenshotMock, getPageMock } = vi.hoisted(() => ({
+  screenshotMock: vi.fn(),
+  getPageMock: vi.fn(() => ({ screenshot: screenshotMock })),
+}))
+
 vi.mock('../../../src/mastra/index.ts', () => ({
   browser: {
-    getPage: vi.fn(() => ({ screenshot: vi.fn() })),
+    getPage: getPageMock,
   },
 }))
 
 test('takeScreenshot delegates to browser page', async () => {
-  const { browser } = await import('../../../src/mastra/index.ts')
   await takeScreenshot('/tmp/x.png')
-  expect((browser as any).getPage).toHaveBeenCalled()
+  expect(getPageMock).toHaveBeenCalled()
+  expect(screenshotMock).toHaveBeenCalledWith({ path: '/tmp/x.png' })
 })

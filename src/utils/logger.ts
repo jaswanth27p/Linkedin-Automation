@@ -1,5 +1,8 @@
 import pino from 'pino'
+import { mkdirSync } from 'node:fs'
 import { appEvents } from './app-events.ts'
+
+mkdirSync('./data', { recursive: true })
 
 export const logger = pino({
   transport: {
