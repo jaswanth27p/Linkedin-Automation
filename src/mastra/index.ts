@@ -5,9 +5,13 @@ import { Memory } from '@mastra/memory'
 import { LibSQLStore } from '@mastra/libsql'
 import { Page } from 'playwright-core'
 import { getBrowserLock } from '../utils/mutex.ts'
+import { ensureDataDir } from '../utils/logger.ts'
+
+ensureDataDir()
 
 export const browser = new AgentBrowser({
   headless: process.env.HEADLESS !== 'false',
+  storageState: './data/browser-storage-state.json',
 })
 
 export const mastra = new Mastra({

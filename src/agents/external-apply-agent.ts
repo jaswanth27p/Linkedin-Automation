@@ -4,6 +4,8 @@ import { applications, jobs } from '../db/schema.ts'
 import { eq } from 'drizzle-orm'
 import { takeScreenshot } from '../utils/screenshot.ts'
 import { NeedsInputError } from '../errors/needs-input-error.ts'
+import { sanitizeId } from '../utils/path.ts'
+import { logToTui } from '../utils/logger.ts'
 import type { ApplyJobData } from '../queues/search.queue.ts'
 
 const externalAgent = createAgent({
@@ -22,13 +24,16 @@ const externalAgent = createAgent({
 
 export async function runExternalApplyJob(job: ApplyJobData, profileText: string, resumePath: string) {
   const db = getDb()
-  const screenshotPath = `data/screenshots/external-${job.id}-${Date.now()}.png`
+  const screenshotPath = `data/screenshots/external-${sanitizeId(job.id)}-${Date.now()}.png`
+  const answerNote = job.answer ? `\nThe user previously answered the following question: ${job.answer}. Use it to complete the form.` : ''
+
+  logToTui(`external apply started: ${job.title} @ ${job.company}`)
 
   try {
     await withBrowser(async () => {
       try {
         await externalAgent.generate(
-          `Apply to ${job.title} at ${job.company} via ${job.applyUrl}.\nProfile:\n${profileText}\nResume path: ${resumePath}`,
+          `Apply to ${job.title} at ${job.company} via ${job.applyUrl}.\nProfile:\n${profileText}\nResume path: ${resumePath}${answerNote}`,
           { memory: { resource: 'user', thread: 'external-apply-agent' } }
         )
         await takeScreenshot(screenshotPath)
@@ -46,6 +51,7 @@ export async function runExternalApplyJob(job: ApplyJobData, profileText: string
       screenshotPath,
     })
     await db.update(jobs).set({ status: 'applied', updatedAt: new Date() }).where(eq(jobs.id, job.id))
+    logToTui(`external apply submitted: ${job.title} @ ${job.company}`)
   } catch (err: any) {
     const match = err.message?.match(/NEEDS_INPUT:\s*(.+)/i)
     if (match) {
@@ -58,6 +64,7 @@ export async function runExternalApplyJob(job: ApplyJobData, profileText: string
         screenshotPath,
       })
       await db.update(jobs).set({ status: 'needs_input', updatedAt: new Date() }).where(eq(jobs.id, job.id))
+      logToTui(`external apply needs input: ${question}`)
       throw new NeedsInputError(question)
     }
 
@@ -69,6 +76,7 @@ export async function runExternalApplyJob(job: ApplyJobData, profileText: string
       screenshotPath,
     })
     await db.update(jobs).set({ status: 'failed', updatedAt: new Date() }).where(eq(jobs.id, job.id))
+    logToTui(`external apply failed: ${job.title} @ ${job.company} — ${err.message}`)
     throw err
   }
 }

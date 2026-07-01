@@ -27,14 +27,19 @@ const baseJob = {
   sourceUrl: 'https://linkedin.com/search',
 }
 
-test('createEasyApplyWorker configures Worker correctly', () => {
+test('createEasyApplyWorker configures Worker with cleanup options', () => {
   createEasyApplyWorker('profile text', '/tmp/resume.pdf')
 
   expect(Worker).toHaveBeenCalledTimes(1)
   expect(Worker).toHaveBeenCalledWith(
     'easy-apply',
     expect.any(Function),
-    { connection: redis, concurrency: 1 },
+    {
+      connection: redis,
+      concurrency: 1,
+      removeOnComplete: { count: 100 },
+      removeOnFail: { count: 100 },
+    },
   )
 })
 

@@ -19,6 +19,7 @@ const mockDb = vi.hoisted(() => ({
   }),
 }))
 const mockTakeScreenshot = vi.hoisted(() => vi.fn())
+const mockLogToTui = vi.hoisted(() => vi.fn())
 
 vi.mock('../../../src/mastra/index.ts', () => ({
   createAgent: () => mockAgent,
@@ -31,6 +32,10 @@ vi.mock('../../../src/db/index.ts', () => ({
 
 vi.mock('../../../src/utils/screenshot.ts', () => ({
   takeScreenshot: mockTakeScreenshot,
+}))
+
+vi.mock('../../../src/utils/logger.ts', () => ({
+  logToTui: mockLogToTui,
 }))
 
 beforeEach(() => {

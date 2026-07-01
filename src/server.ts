@@ -1,14 +1,15 @@
 import { loadConfig } from './config/loader.ts'
 import { getDb } from './db/index.ts'
-import { loadProfileText } from './profile/loader.ts'
+import { buildProfileText } from './profile/loader.ts'
 import { Orchestrator } from './orchestrator/index.ts'
-import { ensureLogDirectory } from './utils/logger.ts'
+import { ensureDataDir, createLogger } from './utils/logger.ts'
 
 async function main() {
-  ensureLogDirectory()
+  ensureDataDir()
+  createLogger()
   const config = await loadConfig()
   getDb()
-  const profileText = await loadProfileText(config.profileFiles.profile)
+  const profileText = await buildProfileText(config)
   const orchestrator = new Orchestrator({ profileText, resumePath: config.profileFiles.resume, config })
   await orchestrator.start('full-run')
   console.log('headless server running')

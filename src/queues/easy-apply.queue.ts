@@ -9,6 +9,11 @@ export function createEasyApplyWorker(profileText: string, resumePath: string) {
     async (job) => {
       await runEasyApplyJob(job.data, profileText, resumePath)
     },
-    { connection: redis as any, concurrency: 1 },
+    {
+      connection: redis as any,
+      concurrency: 1,
+      removeOnComplete: { count: 100 },
+      removeOnFail: { count: 100 },
+    },
   )
 }

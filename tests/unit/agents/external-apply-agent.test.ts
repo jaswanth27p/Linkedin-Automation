@@ -4,6 +4,7 @@ import { NeedsInputError } from '../../../src/errors/needs-input-error.ts'
 
 const mockAgent = vi.hoisted(() => ({ generate: vi.fn() }))
 const mockTakeScreenshot = vi.hoisted(() => vi.fn())
+const mockLogToTui = vi.hoisted(() => vi.fn())
 
 vi.mock('../../../src/mastra/index.ts', () => ({
   createAgent: () => mockAgent,
@@ -21,6 +22,10 @@ vi.mock('../../../src/utils/screenshot.ts', () => ({
   takeScreenshot: mockTakeScreenshot,
 }))
 
+vi.mock('../../../src/utils/logger.ts', () => ({
+  logToTui: mockLogToTui,
+}))
+
 beforeEach(() => {
   vi.clearAllMocks()
   mockAgent.generate.mockRejectedValue(new Error('NEEDS_INPUT: salary expectation'))
@@ -32,4 +37,19 @@ test('runExternalApplyJob throws NeedsInputError', async () => {
     id: '1', title: 'BE', company: 'Acme', applyUrl: 'https://example.com/apply',
     applyType: 'external', sourceUrl: 'https://linkedin.com/search',
   }, 'profile', '/resume.pdf')).rejects.toBeInstanceOf(NeedsInputError)
+})
+
+test('runExternalApplyJob includes previous answer in prompt when provided', async () => {
+  mockAgent.generate.mockRejectedValueOnce(new Error('form error'))
+
+  await expect(runExternalApplyJob({
+    id: '1', title: 'BE', company: 'Acme', applyUrl: 'https://example.com/apply',
+    applyType: 'external', sourceUrl: 'https://linkedin.com/search',
+    answer: '100000 USD',
+  }, 'profile', '/resume.pdf')).rejects.toThrow('form error')
+
+  expect(mockAgent.generate).toHaveBeenCalledWith(
+    expect.stringContaining('The user previously answered the following question: 100000 USD'),
+    expect.anything(),
+  )
 })

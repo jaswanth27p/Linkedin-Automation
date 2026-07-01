@@ -3,6 +3,8 @@ import { getDb } from '../db/index.ts'
 import { applications, jobs } from '../db/schema.ts'
 import { eq } from 'drizzle-orm'
 import { takeScreenshot } from '../utils/screenshot.ts'
+import { sanitizeId } from '../utils/path.ts'
+import { logToTui } from '../utils/logger.ts'
 import type { ApplyJobData } from '../queues/search.queue.ts'
 
 const easyAgent = createAgent({
@@ -17,15 +19,16 @@ const easyAgent = createAgent({
     4. Upload the resume PDF when asked.
     5. Submit the application.
     6. Return "applied" or throw a clear error.
-    If a question is not covered by the profile, throw "NEEDS_INPUT: <question>".
   `,
 })
 
 export async function runEasyApplyJob(job: ApplyJobData, profileText: string, resumePath: string) {
   const db = getDb()
-  const screenshotPath = `data/screenshots/easy-${job.id}-${Date.now()}.png`
+  const screenshotPath = `data/screenshots/easy-${sanitizeId(job.id)}-${Date.now()}.png`
   const updateJobStatus = (status: 'applied' | 'failed') =>
     db.update(jobs).set({ status, updatedAt: new Date() }).where(eq(jobs.id, job.id))
+
+  logToTui(`easy apply started: ${job.title} @ ${job.company}`)
 
   try {
     await withBrowser(async () => {
@@ -49,6 +52,7 @@ export async function runEasyApplyJob(job: ApplyJobData, profileText: string, re
       screenshotPath,
     })
     await updateJobStatus('applied')
+    logToTui(`easy apply submitted: ${job.title} @ ${job.company}`)
   } catch (err: unknown) {
     const errorMessage = err instanceof Error ? err.message : String(err)
     await db.insert(applications).values({
@@ -59,6 +63,7 @@ export async function runEasyApplyJob(job: ApplyJobData, profileText: string, re
       screenshotPath,
     })
     await updateJobStatus('failed')
+    logToTui(`easy apply failed: ${job.title} @ ${job.company} — ${errorMessage}`)
     throw err
   }
 }

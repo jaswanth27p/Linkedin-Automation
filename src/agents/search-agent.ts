@@ -1,6 +1,7 @@
 import { createAgent, withBrowser } from '../mastra/index.ts'
 import { generateSearchUrls } from './search-url-generator.ts'
 import { enqueueJobs, type ApplyJobData } from '../queues/search.queue.ts'
+import { logToTui } from '../utils/logger.ts'
 
 const searchAgent = createAgent({
   id: 'job-searcher',
@@ -38,6 +39,8 @@ function isValidJob(job: Partial<ApplyJobData>): job is ApplyJobData {
 export async function runSearchJob(data: SearchJobData) {
   const extraUrls = await generateSearchUrls(data.requirements, data.profileText)
   const allUrls = [...new Set([...data.urls, ...extraUrls])]
+
+  logToTui(`search started: ${allUrls.length} URL(s)`)
 
   await withBrowser(async () => {
     for (const url of allUrls) {
@@ -86,6 +89,7 @@ Return JSON array of matching jobs. Each job must include sourceUrl set to the s
 
         if (jobs.length > 0) {
           await enqueueJobs(jobs)
+          logToTui(`discovered ${jobs.length} job(s) from ${url}`)
         }
       } catch (err) {
         console.error('Search failed for URL', url, err)

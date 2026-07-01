@@ -4,6 +4,7 @@ import { runSearchJob } from '../../../src/agents/search-agent.ts'
 const mockAgent = vi.hoisted(() => ({ generate: vi.fn() }))
 const mockGenerateSearchUrls = vi.hoisted(() => ({ generateSearchUrls: vi.fn() }))
 const mockEnqueueJobs = vi.hoisted(() => ({ enqueueJobs: vi.fn() }))
+const mockLogToTui = vi.hoisted(() => vi.fn())
 
 vi.mock('../../../src/mastra/index.ts', () => ({
   createAgent: () => mockAgent,
@@ -13,6 +14,10 @@ vi.mock('../../../src/mastra/index.ts', () => ({
 vi.mock('../../../src/agents/search-url-generator.ts', () => mockGenerateSearchUrls)
 
 vi.mock('../../../src/queues/search.queue.ts', () => mockEnqueueJobs)
+
+vi.mock('../../../src/utils/logger.ts', () => ({
+  logToTui: mockLogToTui,
+}))
 
 beforeEach(() => {
   vi.clearAllMocks()

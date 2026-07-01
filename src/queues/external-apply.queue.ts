@@ -9,6 +9,11 @@ export function createExternalApplyWorker(profileText: string, resumePath: strin
     async (job) => {
       await runExternalApplyJob(job.data, profileText, resumePath)
     },
-    { connection: redis as any, concurrency: 1 }
+    {
+      connection: redis as any,
+      concurrency: 1,
+      removeOnComplete: { count: 100 },
+      removeOnFail: { count: 100 },
+    }
   )
 }

@@ -23,6 +23,7 @@ vi.mock('../../../src/db/index.ts', () => ({
 
 vi.mock('../../../src/profile/loader.ts', () => ({
   loadProfileText: vi.fn(() => Promise.resolve('profile text')),
+  buildProfileText: vi.fn(() => Promise.resolve('built profile text')),
 }))
 
 vi.mock('../../../src/profile/memory.ts', () => ({
@@ -31,6 +32,14 @@ vi.mock('../../../src/profile/memory.ts', () => ({
 
 vi.mock('../../../src/tui/index.tsx', () => ({
   startTui: vi.fn(),
+}))
+
+vi.mock('../../../src/utils/logger.ts', () => ({
+  ensureDataDir: vi.fn(),
+  ensureLogDirectory: vi.fn(),
+  createLogger: vi.fn(),
+  logger: { info: vi.fn(), error: vi.fn() },
+  logToTui: vi.fn(),
 }))
 
 vi.mock('../../../src/utils/app-events.ts', () => {

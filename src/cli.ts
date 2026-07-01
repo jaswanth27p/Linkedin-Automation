@@ -1,18 +1,19 @@
 import { loadConfig } from './config/loader.ts'
 import { getDb } from './db/index.ts'
-import { loadProfileText } from './profile/loader.ts'
-import { Orchestrator } from './orchestrator/index.ts'
+import { buildProfileText } from './profile/loader.ts'
+import { Orchestrator, type RunMode } from './orchestrator/index.ts'
 import { startTui } from './tui/index.tsx'
 import { appEvents } from './utils/app-events.ts'
 import { rememberFact } from './profile/memory.ts'
-import { ensureLogDirectory } from './utils/logger.ts'
+import { ensureDataDir, createLogger } from './utils/logger.ts'
 
 export async function main() {
-  ensureLogDirectory()
+  ensureDataDir()
+  createLogger()
   const config = await loadConfig()
   getDb()
 
-  const profileText = await loadProfileText(config.profileFiles.profile)
+  const profileText = await buildProfileText(config)
   const orchestrator = new Orchestrator({ profileText, resumePath: config.profileFiles.resume, config })
 
   let currentPrompt: string | null = null
@@ -28,7 +29,7 @@ export async function main() {
     currentPrompt = state.prompt ?? currentPrompt
     if (state.mode === 'idle') return
     if (orchestrator.isRunning) return
-    orchestrator.start(state.mode as any).catch(console.error)
+    orchestrator.start(state.mode as RunMode).catch(console.error)
   })
 
   orchestrator.on('started', (mode) => appEvents.setState({ mode }))
