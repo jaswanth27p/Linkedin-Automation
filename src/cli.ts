@@ -21,6 +21,7 @@ export async function main() {
 
   appEvents.subscribe((state) => {
     if (state.mode === 'idle') return
+    if (orchestrator.isRunning) return
     orchestrator.start(state.mode as any).catch(console.error)
   })
 
