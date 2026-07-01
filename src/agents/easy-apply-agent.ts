@@ -24,13 +24,21 @@ const easyAgent = createAgent({
 export async function runEasyApplyJob(job: ApplyJobData, profileText: string, resumePath: string) {
   const db = getDb()
   const screenshotPath = `data/screenshots/easy-${job.id}-${Date.now()}.png`
+  const updateJobStatus = (status: 'applied' | 'failed') =>
+    db.update(jobs).set({ status, updatedAt: new Date() }).where(eq(jobs.id, job.id))
 
   try {
     await withBrowser(async () => {
-      await easyAgent.generate(
-        `Apply to ${job.title} at ${job.company} (${job.applyUrl}).\nProfile:\n${profileText}\nResume path: ${resumePath}`,
-        { memory: { resource: 'user', thread: 'easy-apply-agent' } },
-      )
+      try {
+        await easyAgent.generate(
+          `Apply to ${job.title} at ${job.company} (${job.applyUrl}).\nProfile:\n${profileText}\nResume path: ${resumePath}`,
+          { memory: { resource: 'user', thread: 'easy-apply-agent' } },
+        )
+        await takeScreenshot(screenshotPath)
+      } catch (err) {
+        await takeScreenshot(screenshotPath)
+        throw err
+      }
     })
 
     await db.insert(applications).values({
@@ -40,17 +48,17 @@ export async function runEasyApplyJob(job: ApplyJobData, profileText: string, re
       result: 'submitted',
       screenshotPath,
     })
-    await db.update(jobs).set({ status: 'applied', updatedAt: new Date() }).where(eq(jobs.id, job.id))
-  } catch (err: any) {
-    await takeScreenshot(screenshotPath)
+    await updateJobStatus('applied')
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : String(err)
     await db.insert(applications).values({
       id: crypto.randomUUID(),
       jobId: job.id,
       status: 'failed',
-      error: err.message,
+      error: errorMessage,
       screenshotPath,
     })
-    await db.update(jobs).set({ status: 'failed', updatedAt: new Date() }).where(eq(jobs.id, job.id))
+    await updateJobStatus('failed')
     throw err
   }
 }
