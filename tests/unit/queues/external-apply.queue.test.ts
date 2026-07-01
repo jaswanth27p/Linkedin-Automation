@@ -3,11 +3,14 @@ import { Worker } from 'bullmq'
 import { createExternalApplyWorker } from '../../../src/queues/external-apply.queue.ts'
 import { redis } from '../../../src/queues/connection.ts'
 import { runExternalApplyJob } from '../../../src/agents/external-apply-agent.ts'
+import { deadLetterQueue } from '../../../src/queues/dead-letter.queue.ts'
 
 const mockRunExternalApplyJob = vi.hoisted(() => vi.fn())
+const mockWorker = vi.hoisted(() => ({ on: vi.fn(), close: vi.fn() }))
+const mockDeadLetterAdd = vi.hoisted(() => vi.fn())
 
 vi.mock('bullmq', () => ({
-  Worker: vi.fn(),
+  Worker: vi.fn(function () { return mockWorker }),
 }))
 
 vi.mock('../../../src/queues/connection.ts', () => ({
@@ -16,6 +19,10 @@ vi.mock('../../../src/queues/connection.ts', () => ({
 
 vi.mock('../../../src/agents/external-apply-agent.ts', () => ({
   runExternalApplyJob: mockRunExternalApplyJob,
+}))
+
+vi.mock('../../../src/queues/dead-letter.queue.ts', () => ({
+  deadLetterQueue: { add: mockDeadLetterAdd },
 }))
 
 const baseJob = {
@@ -55,4 +62,26 @@ test('Worker processor passes job answer to runExternalApplyJob', async () => {
     'profile text',
     '/tmp/resume.pdf',
   )
+})
+
+test('Worker emits max-retried job to dead-letter queue', async () => {
+  createExternalApplyWorker('profile text', '/tmp/resume.pdf')
+
+  const failedHandler = mockWorker.on.mock.calls.find(([event]) => event === 'failed')?.[1] as
+    | ((job: { name: string; id: string; data: typeof baseJob; attemptsMade: number; opts: { attempts?: number } }, err: Error) => void)
+    | undefined
+
+  expect(failedHandler).toBeDefined()
+
+  const job = {
+    name: 'external:1',
+    id: 'external:1',
+    data: baseJob,
+    attemptsMade: 3,
+    opts: { attempts: 3 },
+  }
+  failedHandler!(job, new Error('boom'))
+
+  expect(mockDeadLetterAdd).toHaveBeenCalledTimes(1)
+  expect(mockDeadLetterAdd).toHaveBeenCalledWith('external:1', baseJob, { jobId: 'external:1' })
 })

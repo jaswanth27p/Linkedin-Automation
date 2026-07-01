@@ -3,11 +3,14 @@ import { Worker } from 'bullmq'
 import { createEasyApplyWorker } from '../../../src/queues/easy-apply.queue.ts'
 import { redis } from '../../../src/queues/connection.ts'
 import { runEasyApplyJob } from '../../../src/agents/easy-apply-agent.ts'
+import { deadLetterQueue } from '../../../src/queues/dead-letter.queue.ts'
 
 const mockRunEasyApplyJob = vi.hoisted(() => vi.fn())
+const mockWorker = vi.hoisted(() => ({ on: vi.fn(), close: vi.fn() }))
+const mockDeadLetterAdd = vi.hoisted(() => vi.fn())
 
 vi.mock('bullmq', () => ({
-  Worker: vi.fn(),
+  Worker: vi.fn(function () { return mockWorker }),
 }))
 
 vi.mock('../../../src/queues/connection.ts', () => ({
@@ -16,6 +19,10 @@ vi.mock('../../../src/queues/connection.ts', () => ({
 
 vi.mock('../../../src/agents/easy-apply-agent.ts', () => ({
   runEasyApplyJob: mockRunEasyApplyJob,
+}))
+
+vi.mock('../../../src/queues/dead-letter.queue.ts', () => ({
+  deadLetterQueue: { add: mockDeadLetterAdd },
 }))
 
 const baseJob = {
@@ -51,4 +58,26 @@ test('Worker processor delegates to runEasyApplyJob', async () => {
 
   expect(mockRunEasyApplyJob).toHaveBeenCalledTimes(1)
   expect(mockRunEasyApplyJob).toHaveBeenCalledWith(baseJob, 'profile text', '/tmp/resume.pdf')
+})
+
+test('Worker emits max-retried job to dead-letter queue', async () => {
+  createEasyApplyWorker('profile text', '/tmp/resume.pdf')
+
+  const failedHandler = mockWorker.on.mock.calls.find(([event]) => event === 'failed')?.[1] as
+    | ((job: { name: string; id: string; data: typeof baseJob; attemptsMade: number; opts: { attempts?: number } }, err: Error) => void)
+    | undefined
+
+  expect(failedHandler).toBeDefined()
+
+  const job = {
+    name: 'easy:1',
+    id: 'easy:1',
+    data: baseJob,
+    attemptsMade: 3,
+    opts: { attempts: 3 },
+  }
+  failedHandler!(job, new Error('boom'))
+
+  expect(mockDeadLetterAdd).toHaveBeenCalledTimes(1)
+  expect(mockDeadLetterAdd).toHaveBeenCalledWith('easy:1', baseJob, { jobId: 'easy:1' })
 })
