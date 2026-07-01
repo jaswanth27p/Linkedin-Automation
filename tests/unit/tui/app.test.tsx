@@ -10,6 +10,7 @@ vi.mock('../../../src/tui/use-app-events.ts', () => ({
     queueCounts: { search: 0, easy: 0, external: 0 },
     logs: ['ready'],
     prompt: null,
+    promptJobId: null,
     start: vi.fn(),
     stop: vi.fn(),
     answerPrompt: vi.fn(),

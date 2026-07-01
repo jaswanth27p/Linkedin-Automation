@@ -9,7 +9,7 @@ export function Menu() {
       [a] apply only{'\n'}
       [x] full run (cron){'\n'}
       [s] stop{'\n'}
-      [esc] quit
+      [esc] stop / cancel
     </Text>
   )
 }
