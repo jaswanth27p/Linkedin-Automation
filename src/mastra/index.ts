@@ -3,6 +3,7 @@ import { Agent } from '@mastra/core/agent'
 import { AgentBrowser } from '@mastra/agent-browser'
 import { Memory } from '@mastra/memory'
 import { LibSQLStore } from '@mastra/libsql'
+import { Page } from 'playwright-core'
 import { getBrowserLock } from '../utils/mutex.ts'
 
 export const browser = new AgentBrowser({
@@ -43,4 +44,9 @@ export function createAgent({
 
 export async function withBrowser<T>(fn: () => Promise<T>): Promise<T> {
   return getBrowserLock().run(fn)
+}
+
+export async function getBrowserPage(): Promise<Page> {
+  // getPage is private on AgentBrowser; expose it through this project helper.
+  return (browser as any).getPage()
 }

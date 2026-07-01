@@ -5,8 +5,10 @@ import { Orchestrator } from './orchestrator/index.ts'
 import { startTui } from './tui/index.tsx'
 import { appEvents } from './utils/app-events.ts'
 import { rememberFact } from './profile/memory.ts'
+import { ensureLogDirectory } from './utils/logger.ts'
 
 export async function main() {
+  ensureLogDirectory()
   const config = await loadConfig()
   getDb()
 

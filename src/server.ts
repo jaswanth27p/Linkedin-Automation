@@ -2,8 +2,10 @@ import { loadConfig } from './config/loader.ts'
 import { getDb } from './db/index.ts'
 import { loadProfileText } from './profile/loader.ts'
 import { Orchestrator } from './orchestrator/index.ts'
+import { ensureLogDirectory } from './utils/logger.ts'
 
 async function main() {
+  ensureLogDirectory()
   const config = await loadConfig()
   getDb()
   const profileText = await loadProfileText(config.profileFiles.profile)
