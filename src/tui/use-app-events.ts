@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { appEvents, type AppState } from '../utils/app-events.ts'
 
 export function useAppEvents() {
@@ -9,10 +9,14 @@ export function useAppEvents() {
     return unsub
   }, [])
 
+  const start = useCallback((mode: string) => appEvents.start(mode), [])
+  const stop = useCallback(() => appEvents.stop(), [])
+  const answerPrompt = useCallback((answer: string) => appEvents.answerPrompt(answer), [])
+
   return {
     ...state,
-    start: (mode: any) => appEvents.start(mode),
-    stop: () => appEvents.stop(),
-    answerPrompt: (answer: string) => appEvents.answerPrompt(answer),
+    start,
+    stop,
+    answerPrompt,
   }
 }

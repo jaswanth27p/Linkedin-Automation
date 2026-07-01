@@ -17,7 +17,7 @@ class AppEvents extends EventEmitter {
     prompt: null,
   }
 
-  getState() { return this.state }
+  getState() { return { ...this.state } }
 
   setState(patch: Partial<AppState>) {
     this.state = { ...this.state, ...patch }
