@@ -14,21 +14,22 @@
     "@mastra/core": "latest",
     "@mastra/libsql": "latest",
     "@mastra/memory": "latest",
+    "better-sqlite3": "latest",
     "bullmq": "latest",
     "drizzle-orm": "latest",
-    "better-sqlite3": "latest",
-    "ioredis": "latest",
-    "zod": "latest",
     "ink": "latest",
-    "react": "latest",
     "ink-text-input": "latest",
+    "ioredis": "latest",
     "pino": "latest",
-    "pino-pretty": "latest"
+    "pino-pretty": "latest",
+    "react": "latest",
+    "zod": "latest"
   },
   "devDependencies": {
     "@types/better-sqlite3": "latest",
     "@types/node": "latest",
     "@types/react": "latest",
+    "ink-testing-library": "^4.0.0",
     "tsx": "latest",
     "typescript": "latest",
     "vitest": "latest"

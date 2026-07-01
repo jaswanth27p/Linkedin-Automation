@@ -10,6 +10,7 @@
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "outDir": "dist",
+    "jsx": "react-jsx",
     "types": ["vitest/globals", "node"]
   },
   "include": ["src/**/*", "tests/**/*", "linkedin-auto.config.ts"]
