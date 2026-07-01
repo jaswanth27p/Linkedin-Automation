@@ -55,7 +55,7 @@ Single TypeScript project. One process runs the TUI, scheduler, queues, and work
 | Layer | Choice |
 |-------|--------|
 | Runtime | Node.js 20+, TypeScript, `tsx` |
-| TUI | Ink + React (terminal UI) |
+| TUI | Ink + React with layout boxes/borders (not line-by-line output) |
 | HTTP/API | Fastify (lightweight, optional API surface) |
 | Queues / scheduler | BullMQ + Redis |
 | AI / browser | Mastra (browser tool, agents, workflows, memory) |
@@ -114,13 +114,16 @@ All workers run with concurrency `1`. A global lock ensures only one Mastra brow
 
 ### 7. TUI
 
-Built with Ink. Main panels:
+Built with **Ink + React** using box-based layout (borders, flex columns/rows) so it looks like a small dashboard, not a scrolling line-by-line CLI. Main panels:
 
-- **Menu**: start recent search, full search, apply-only mode, run until stopped, run N times, run N hours.
-- **Status**: active job, current queue counts, next cron runs.
-- **Logs**: pino log stream.
-- **Prompts**: when an agent needs missing info, the TUI shows the question and an input field; the answer is saved to memory and the job resumes.
-- **Controls**: pause / resume / stop.
+- **Top bar**: current mode, run status, next cron times.
+- **Left sidebar / menu**: start recent search, full search, apply-only mode, run until stopped, run N times, run N hours.
+- **Center status panel**: active agent, current job title/company, queue counts, progress.
+- **Bottom-left logs panel**: tail of pino logs inside a bordered box.
+- **Bottom-right prompts panel**: when an agent needs missing info, it shows the question and a focused input box; the answer is saved to memory and the job resumes.
+- **Global controls**: pause / resume / stop shortcuts.
+
+Layout is built with Ink `Box` components, fixed heights, and border styling so panels stay visible together.
 
 ## Data Flow
 
