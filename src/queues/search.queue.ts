@@ -1,4 +1,5 @@
 import { createQueue } from './connection.ts'
+import type { SearchJobData } from '../agents/search-agent.ts'
 
 export interface ApplyJobData {
   id: string
@@ -12,6 +13,7 @@ export interface ApplyJobData {
 
 const easyApplyQueue = createQueue<ApplyJobData>('easy-apply')
 const externalApplyQueue = createQueue<ApplyJobData>('external-apply')
+export const searchQueue = createQueue<SearchJobData>('search')
 
 export async function enqueueJobs(jobs: ApplyJobData[]) {
   for (const job of jobs) {
