@@ -1,4 +1,5 @@
 import { test, expect, vi, beforeEach } from 'vitest'
+import { Worker } from 'bullmq'
 import { Orchestrator } from '../../../src/orchestrator/index.ts'
 import { searchQueue } from '../../../src/queues/search.queue.ts'
 import { createEasyApplyWorker } from '../../../src/queues/easy-apply.queue.ts'
@@ -16,6 +17,9 @@ const mockDb = vi.hoisted(() => ({
   select: vi.fn(() => mockSelectChain),
 }))
 
+vi.mock('bullmq', () => ({
+  Worker: vi.fn(function () { return { close: vi.fn() } }),
+}))
 vi.mock('../../../src/queues/connection.ts', () => ({
   redis: {},
 }))
@@ -28,6 +32,14 @@ vi.mock('../../../src/utils/logger.ts', () => ({
   createLogger: vi.fn(),
   ensureDataDir: vi.fn(),
   logger: { info: vi.fn(), error: vi.fn() },
+}))
+vi.mock('../../../src/utils/app-events.ts', () => ({
+  appEvents: {
+    setState: vi.fn(),
+    getState: vi.fn(() => ({})),
+    subscribe: vi.fn(() => vi.fn()),
+    on: vi.fn(),
+  },
 }))
 vi.mock('../../../src/agents/search-agent.ts', () => ({
   runSearchJob: vi.fn(),
@@ -67,6 +79,7 @@ test('orchestrator starts and stops in apply-only mode', async () => {
   await orch.start('apply-only')
   expect(orch.isRunning).toBe(true)
   expect(searchQueue.add).not.toHaveBeenCalled()
+  expect(Worker).not.toHaveBeenCalledWith('search', expect.anything(), expect.anything())
   await orch.stop()
   expect(orch.isRunning).toBe(false)
 })
@@ -129,7 +142,7 @@ test('full-run mode schedules repeatable recent and full search jobs', async () 
   expect(searchQueue.removeRepeatableByKey).toHaveBeenCalledWith('full-search')
 })
 
-test('resume event removes and re-adds the most recent needs_input job', async () => {
+test('resume event removes and re-adds the exact needs_input job', async () => {
   const { easyApplyQueue } = await import('../../../src/queues/search.queue.ts')
   mockSelectChain.get.mockReturnValue({
     jobs: {
@@ -143,11 +156,12 @@ test('resume event removes and re-adds the most recent needs_input job', async (
   })
 
   const orch = new Orchestrator(baseDeps)
-  orch.emit('resume', 'yes')
+  orch.emit('resume', { answer: 'yes', jobId: 'job-1' })
 
   // Wait for async handler
   await new Promise((resolve) => setTimeout(resolve, 10))
 
+  expect(mockDb.select).toHaveBeenCalled()
   expect(easyApplyQueue.remove).toHaveBeenCalledWith('easy:job-1')
   expect(easyApplyQueue.add).toHaveBeenCalledWith(
     'easy:job-1',

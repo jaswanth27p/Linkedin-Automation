@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { Worker } from 'bullmq'
-import { desc, eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { redis } from '../queues/connection.ts'
 import { searchQueue, easyApplyQueue, externalApplyQueue } from '../queues/search.queue.ts'
 import { createEasyApplyWorker } from '../queues/easy-apply.queue.ts'
@@ -10,6 +10,7 @@ import { scheduleSearchJobs, unscheduleSearchJobs } from '../scheduler/index.ts'
 import { getDb } from '../db/index.ts'
 import { applications, jobs } from '../db/schema.ts'
 import { logToTui } from '../utils/logger.ts'
+import { appEvents } from '../utils/app-events.ts'
 import type { AppConfig } from '../config/schema.ts'
 
 export type RunMode = 'recent-search' | 'full-search' | 'apply-only' | 'full-run'
@@ -22,11 +23,12 @@ interface OrchestratorDeps {
 
 export class Orchestrator extends EventEmitter {
   private workers: Worker[] = []
+  private pollInterval: ReturnType<typeof setInterval> | null = null
   public isRunning = false
 
   constructor(private deps: OrchestratorDeps) {
     super()
-    this.on('resume', (answer: string) => this.handleResume(answer))
+    this.on('resume', ({ answer, jobId }: { answer: string; jobId: string | null }) => this.handleResume(answer, jobId))
   }
 
   async start(mode: RunMode) {
@@ -43,20 +45,29 @@ export class Orchestrator extends EventEmitter {
     this.workers.push(createEasyApplyWorker(this.deps.profileText, this.deps.resumePath))
     this.workers.push(createExternalApplyWorker(this.deps.profileText, this.deps.resumePath))
 
-    const searchWorker = new Worker<SearchJobData>(
-      'search',
-      async (job) => {
-        const data = { ...job.data, profileText: this.deps.profileText }
-        await runSearchJob(data)
-      },
-      {
-        connection: redis as any,
-        concurrency: 1,
-        removeOnComplete: { count: 100 },
-        removeOnFail: { count: 100 },
-      }
-    )
-    this.workers.push(searchWorker)
+    if (mode !== 'apply-only') {
+      const searchWorker = new Worker<SearchJobData>(
+        'search',
+        async (job) => {
+          appEvents.setState({ activeJob: { title: job.name, company: 'search' } })
+          try {
+            const data = { ...job.data, profileText: this.deps.profileText }
+            await runSearchJob(data)
+          } finally {
+            appEvents.setState({ activeJob: null })
+          }
+        },
+        {
+          connection: redis as any,
+          concurrency: 1,
+          removeOnComplete: { count: 100 },
+          removeOnFail: { count: 100 },
+        }
+      )
+      this.workers.push(searchWorker)
+    }
+
+    this.startQueueCountPolling()
 
     this.isRunning = true
     this.emit('started', mode)
@@ -64,6 +75,7 @@ export class Orchestrator extends EventEmitter {
   }
 
   async stop() {
+    this.stopQueueCountPolling()
     await unscheduleSearchJobs(searchQueue)
     await Promise.all(this.workers.map(w => w.close()))
     this.workers = []
@@ -72,18 +84,21 @@ export class Orchestrator extends EventEmitter {
     logToTui('orchestrator stopped')
   }
 
-  private async handleResume(answer: string) {
+  private async handleResume(answer: string, jobId: string | null) {
     const db = getDb()
+    if (!jobId) {
+      logToTui('resume warning: no jobId provided')
+      return
+    }
+
     const row = await db.select()
       .from(applications)
       .leftJoin(jobs, eq(applications.jobId, jobs.id))
-      .where(eq(applications.status, 'needs_input'))
-      .orderBy(desc(applications.createdAt))
-      .limit(1)
+      .where(and(eq(applications.status, 'needs_input'), eq(applications.jobId, jobId)))
       .get()
 
     if (!row || !row.jobs) {
-      logToTui('resume warning: no needs_input application found')
+      logToTui(`resume warning: no needs_input application found for ${jobId}`)
       return
     }
 
@@ -104,5 +119,30 @@ export class Orchestrator extends EventEmitter {
     await queue.remove(name)
     await queue.add(name, jobData, { jobId: name })
     logToTui(`resumed ${job.applyType} job: ${job.title} @ ${job.company}`)
+  }
+
+  private startQueueCountPolling() {
+    this.stopQueueCountPolling()
+    this.pollInterval = setInterval(async () => {
+      const [search, easy, external] = await Promise.all([
+        searchQueue.getJobCounts('wait', 'active', 'delayed'),
+        easyApplyQueue.getJobCounts('wait', 'active', 'delayed'),
+        externalApplyQueue.getJobCounts('wait', 'active', 'delayed'),
+      ])
+      appEvents.setState({
+        queueCounts: {
+          search: search.wait + search.active + search.delayed,
+          easy: easy.wait + easy.active + easy.delayed,
+          external: external.wait + external.active + external.delayed,
+        },
+      })
+    }, 5000)
+  }
+
+  private stopQueueCountPolling() {
+    if (this.pollInterval) {
+      clearInterval(this.pollInterval)
+      this.pollInterval = null
+    }
   }
 }
