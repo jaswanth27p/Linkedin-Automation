@@ -1,5 +1,8 @@
 import pino, { type Logger } from 'pino'
 import { mkdirSync } from 'node:fs'
+import { createWriteStream } from 'node:fs'
+import { Writable } from 'node:stream'
+import pinoPretty from 'pino-pretty'
 import { appEvents } from './app-events.ts'
 
 const DATA_DIR = './data'
@@ -17,12 +20,21 @@ let _logger: Logger | null = null
 
 export function createLogger(): Logger {
   ensureDataDir()
-  _logger = pino({
-    transport: {
-      target: 'pino-pretty',
-      options: { colorize: false, destination: LOG_FILE },
+
+  const prettyStream = pinoPretty({ colorize: false })
+  const fileStream = createWriteStream(LOG_FILE, { flags: 'a' })
+  const tuiStream = new Writable({
+    write(chunk, _encoding, callback) {
+      const line = chunk.toString().trim()
+      if (line) logToTui(line)
+      callback()
     },
   })
+
+  prettyStream.pipe(fileStream)
+  prettyStream.pipe(tuiStream)
+
+  _logger = pino(prettyStream)
   return _logger
 }
 
