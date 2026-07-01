@@ -19,5 +19,15 @@ vi.mock('../../../src/queues/search.queue.ts', () => ({
 test('runSearchJob enqueues discovered jobs', async () => {
   const { enqueueJobs } = await import('../../../src/queues/search.queue.ts')
   await runSearchJob({ urls: ['https://linkedin.com/search'], profileText: 'Node', requirements: 'backend' })
-  expect(enqueueJobs).toHaveBeenCalled()
+  expect(enqueueJobs).toHaveBeenCalledTimes(1)
+  expect(enqueueJobs).toHaveBeenCalledWith([
+    expect.objectContaining({
+      id: '1',
+      title: 'Backend',
+      company: 'Acme',
+      applyType: 'easy',
+      applyUrl: 'https://linkedin.com/jobs/1',
+      sourceUrl: 'https://linkedin.com/search',
+    }),
+  ])
 })
