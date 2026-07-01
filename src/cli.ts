@@ -13,13 +13,17 @@ export async function main() {
   const profileText = await loadProfileText(config.profileFiles.profile)
   const orchestrator = new Orchestrator({ profileText, resumePath: config.profileFiles.resume, config })
 
+  let currentPrompt: string | null = null
+
   appEvents.on('answer', async (answer: string) => {
-    const question = appEvents.getState().prompt
+    const question = currentPrompt
+    currentPrompt = null
     if (question) await rememberFact(question, answer)
     orchestrator.emit('resume', answer)
   })
 
   appEvents.subscribe((state) => {
+    currentPrompt = state.prompt ?? currentPrompt
     if (state.mode === 'idle') return
     if (orchestrator.isRunning) return
     orchestrator.start(state.mode as any).catch(console.error)
