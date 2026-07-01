@@ -36,12 +36,7 @@ function isValidJob(job: Partial<ApplyJobData>): job is ApplyJobData {
 }
 
 export async function runSearchJob(data: SearchJobData) {
-  let extraUrls: string[] = []
-  try {
-    extraUrls = await generateSearchUrls(data.requirements, data.profileText)
-  } catch (err) {
-    console.error('generateSearchUrls failed, continuing with provided URLs', err)
-  }
+  const extraUrls = await generateSearchUrls(data.requirements, data.profileText)
   const allUrls = [...new Set([...data.urls, ...extraUrls])]
 
   await withBrowser(async () => {
@@ -80,7 +75,7 @@ Return JSON array of matching jobs. Each job must include sourceUrl set to the s
         for (const item of parsed as Array<Partial<ApplyJobData>>) {
           const job = {
             ...item,
-            sourceUrl: item.sourceUrl ?? url,
+            sourceUrl: url,
           }
           if (!isValidJob(job)) {
             console.error('Skipping invalid job from', url, job)

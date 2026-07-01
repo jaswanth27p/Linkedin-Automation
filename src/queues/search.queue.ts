@@ -16,7 +16,7 @@ const externalApplyQueue = createQueue<ApplyJobData>('external-apply')
 export async function enqueueJobs(jobs: ApplyJobData[]) {
   for (const job of jobs) {
     const queue = job.applyType === 'easy' ? easyApplyQueue : externalApplyQueue
-    const name = `${job.applyType}:${job.id}` as string
+    const name = `${job.applyType}:${job.id}`
     await queue.add(name, job, { jobId: name })
   }
 }
