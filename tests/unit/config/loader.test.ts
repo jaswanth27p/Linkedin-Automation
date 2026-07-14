@@ -1,4 +1,4 @@
-import { test, expect } from 'vitest'
+import { test, expect } from 'bun:test'
 import { loadConfig } from '../../../src/config/loader.ts'
 
 test('loads and validates sample config', async () => {

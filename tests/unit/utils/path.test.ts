@@ -1,4 +1,4 @@
-import { test, expect } from 'vitest'
+import { test, expect } from 'bun:test'
 import { sanitizeId } from '../../../src/utils/path.ts'
 
 test('sanitizeId keeps safe characters', () => {
