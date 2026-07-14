@@ -10,8 +10,9 @@
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "outDir": "dist",
-    "jsx": "react-jsx",
-    "types": ["vitest/globals", "node"]
+    "jsx": "preserve",
+    "jsxImportSource": "@opentui/solid",
+    "types": ["bun", "node"]
   },
-  "include": ["src/**/*", "tests/**/*", "linkedin-auto.config.ts"]
+  "include": ["src/**/*", "tests/**/*", "linkedin-auto.config.ts", "drizzle.config.ts"]
 }
