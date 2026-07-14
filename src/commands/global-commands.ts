@@ -2,7 +2,7 @@ import { registerCommand } from './registry.ts'
 import { listCommandsForTab } from './registry.ts'
 import { appState, setSessionStatus, setActiveTab, setSetting, pushLog, TAB_IDS } from '../state/app-state.ts'
 import type { TabId, Settings } from '../state/types.ts'
-import { getBrowserManager } from '../browser/session.ts'
+import { getBrowserServerPort } from '../browser/session.ts'
 import { verifyLogin } from '../browser/verify-login.ts'
 
 export function registerGlobalCommands(): void {
@@ -51,18 +51,29 @@ export function registerGlobalCommands(): void {
   registerCommand({
     name: 'verify-login',
     scope: 'global',
-    description: 'Check LinkedIn + Gmail login status in the bootstrap browser',
+    description: 'Check LinkedIn login status in the bootstrap browser',
     run: async () => {
-      const manager = getBrowserManager()
-      const result = await verifyLogin(manager)
+      const port = getBrowserServerPort()
+      const result = await verifyLogin(port)
       setSessionStatus('linkedin', result.linkedin)
-      setSessionStatus('gmail', result.gmail)
-      if (result.linkedin && result.gmail) {
-        pushLog(appState.activeTab, 'Login verified: LinkedIn + Gmail connected.')
+      if (result.linkedin) {
+        pushLog(appState.activeTab, 'Login verified: LinkedIn connected.')
       } else {
-        const missing = [!result.linkedin && 'LinkedIn', !result.gmail && 'Gmail'].filter(Boolean).join(', ')
-        pushLog(appState.activeTab, `Not logged in yet: ${missing}. Log in in the browser window, then run /verify-login again.`)
+        pushLog(appState.activeTab, 'Not logged in yet. Log in in the browser window, then run /verify-login again.')
       }
+    },
+  })
+
+  registerCommand({
+    name: 'exit',
+    scope: 'global',
+    description: 'Close the browser and exit the application',
+    run: async () => {
+      pushLog(appState.activeTab, 'Shutting down...')
+      const { shutdownBrowserServer } = await import('../browser/session.ts')
+      await shutdownBrowserServer()
+      const { destroyTui } = await import('../tui/index.tsx')
+      destroyTui()
     },
   })
 }

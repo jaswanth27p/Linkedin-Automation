@@ -4,9 +4,8 @@ import { theme } from '../theme.ts'
 export function Header() {
   const statusText = () => {
     const s = appState.session
-    if (s.linkedin && s.gmail) return 'LinkedIn + Gmail connected'
-    const waiting = [!s.linkedin && 'LinkedIn', !s.gmail && 'Gmail'].filter(Boolean).join(' + ')
-    return `Waiting for login: ${waiting}`
+    if (s.linkedin) return 'LinkedIn connected'
+    return 'Waiting for login: LinkedIn'
   }
 
   return (

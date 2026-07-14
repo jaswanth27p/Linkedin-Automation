@@ -31,9 +31,8 @@ describe('dispatchCommand', () => {
     expect(appState.tabs.search.logs).not.toContain('ran')
   })
 
-  test('allows tab-scoped commands once both sessions are connected', async () => {
+  test('allows tab-scoped commands once linkedin is connected', async () => {
     setSessionStatus('linkedin', true)
-    setSessionStatus('gmail', true)
     await dispatchCommand('/search-urls')
     expect(appState.tabs.search.logs).toContain('ran')
   })

@@ -15,16 +15,13 @@ beforeEach(() => {
 })
 
 describe('app-state', () => {
-  test('starts locked with both sessions disconnected', () => {
+  test('starts locked with linkedin disconnected', () => {
     expect(isUnlocked()).toBe(false)
     expect(appState.session.linkedin).toBe(false)
-    expect(appState.session.gmail).toBe(false)
   })
 
-  test('unlocks only when both linkedin and gmail are connected', () => {
+  test('unlocks when linkedin is connected', () => {
     setSessionStatus('linkedin', true)
-    expect(isUnlocked()).toBe(false)
-    setSessionStatus('gmail', true)
     expect(isUnlocked()).toBe(true)
   })
 

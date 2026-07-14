@@ -16,7 +16,6 @@ describe('TUI components', () => {
     expect(setup.captureCharFrame()).toContain('Waiting for login')
 
     setSessionStatus('linkedin', true)
-    setSessionStatus('gmail', true)
     await setup.renderOnce()
     expect(setup.captureCharFrame()).toContain('connected')
   })
