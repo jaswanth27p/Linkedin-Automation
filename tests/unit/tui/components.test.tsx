@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach } from 'bun:test'
 import { testRender } from '@opentui/solid'
-import { initAppState, setSessionStatus, setAgentStatus, setNeedsInput, pushLog } from '../../../src/state/app-state.ts'
+import { initAppState, setSessionStatus, setNeedsInput, pushLog } from '../../../src/state/app-state.ts'
 import { Header } from '../../../src/tui/components/Header.tsx'
 import { Sidebar } from '../../../src/tui/components/Sidebar.tsx'
 import { LogPanel } from '../../../src/tui/components/LogPanel.tsx'

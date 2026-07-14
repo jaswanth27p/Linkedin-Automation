@@ -3,8 +3,9 @@ import { BrowserManager } from 'agent-browser'
 let manager: BrowserManager | null = null
 
 export async function launchBootstrapBrowser(storageStatePath: string): Promise<BrowserManager> {
+  if (manager) return manager
   manager = new BrowserManager()
-  await manager.launch({ headless: false, storageState: storageStatePath })
+  await manager.launch({ headless: false, autoStateFilePath: storageStatePath })
   return manager
 }
 
