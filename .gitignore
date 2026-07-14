@@ -1,5 +1,7 @@
 .worktrees/
+.claude/
 node_modules/
 dist/
 .env
 data/
+docs/
