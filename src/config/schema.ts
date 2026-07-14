@@ -1,23 +1,17 @@
 import { z } from 'zod'
 
-export const cronSchema = z.object({
-  intervalMinutes: z.number().positive(),
-  postedWithinMinutes: z.number().positive().optional(),
-})
-
 export const appConfigSchema = z.object({
   mustCheckUrls: z.array(z.string().url()),
   requirements: z.string().min(1),
-  cron: z.object({
-    recent: cronSchema,
-    full: cronSchema,
-  }),
-  concurrency: z.number().default(1),
-  profileFiles: z.object({
-    profile: z.string(),
-    resume: z.string(),
-  }),
+  concurrency: z.number().positive().default(1),
   model: z.string().default('opencode-go/kimi-k2.7-code'),
+  profileFiles: z.object({
+    resume: z.string(),
+    profile: z.string(),
+  }),
+  search: z.object({
+    irrelevantBailRatio: z.number().min(0).max(1).default(0.5),
+  }).default({ irrelevantBailRatio: 0.5 }),
 })
 
 export type AppConfig = z.infer<typeof appConfigSchema>

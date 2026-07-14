@@ -9,14 +9,13 @@ export default {
     Prefer remote or hybrid in the US.
     Avoid roles requiring more than 8 years of experience.
   `,
-  cron: {
-    recent: { intervalMinutes: 60, postedWithinMinutes: 1440 },
-    full: { intervalMinutes: 60 * 24 },
-  },
   concurrency: 1,
   profileFiles: {
-    profile: './profile.md',
-    resume: './resume.pdf',
+    resume: './resume.md',
+    profile: './profile.json',
   },
   model: 'opencode-go/kimi-k2.7-code',
+  search: {
+    irrelevantBailRatio: 0.5,
+  },
 } satisfies AppConfig
