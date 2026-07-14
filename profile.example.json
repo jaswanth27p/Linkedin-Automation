@@ -1,0 +1,8 @@
+{
+  "contact": { "email": "jaswanthjas20@gmail.com", "phone": "", "location": "" },
+  "workAuth": { "authorized": true, "requiresSponsorship": false },
+  "experienceYears": 5,
+  "salaryExpectation": { "min": 0, "max": 0, "currency": "USD" },
+  "links": { "linkedin": "", "github": "", "portfolio": "" },
+  "answers": {}
+}
