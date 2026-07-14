@@ -21,7 +21,7 @@ This is a full-flow product: TUI shell, browser login bootstrap, search agent, e
 
 **Process model**: single Bun process. TUI (`@opentui/solid`) drives an `AppState` store (Solid signals/stores, reactive — replaces the old manual `EventEmitter` + `subscribe` bus). Orchestrator + BullMQ workers run in the same process. The old `src/server.ts` (separate HTTP server) is dropped — dead weight for a single-user local TUI app.
 
-**Browser**: one Mastra `AgentBrowser` instance, one browser context, created at TUI startup — **always visible, `headless: false` hardcoded, no toggle**. Login bootstrap opens two tabs (LinkedIn, Gmail) in that context. All later agents (search, easy-apply, external-apply) get pages from this *same* context via a shared `BrowserSession` helper, so cookies/login state carry over to every tab. A mutex (evolution of old `utils/mutex.ts`) serializes actions on any single page; different agents can hold different tabs concurrently.
+**Browser**: bootstrap launches one real browser via `agent-browser`'s `BrowserManager` directly (not through Mastra) — `headless: false`, hardcoded, no toggle. This is deliberate: Mastra's `AgentBrowser` wraps browser access behind a thread-scoped LLM-tool abstraction with no public raw-page access, whereas `BrowserManager` exposes `launch()`, `navigate()`, `newTab()`, `switchTo()`, `getPage()` (real Playwright `Page`), and — critically — `getCdpUrl()` directly, which plain login-bootstrap (no LLM involved) needs. Login bootstrap opens two tabs (LinkedIn, Gmail) on this manager. Every later agent (search, easy-apply, external-apply, each Phase 2-4) constructs its own Mastra `AgentBrowser` with `{ cdpUrl: <bootstrap manager's getCdpUrl()>, scope: 'shared' }` — this attaches it to the *same running browser* over Chrome DevTools Protocol instead of launching a new one, so every agent sees the already-authenticated LinkedIn/Gmail cookies. This satisfies the requirement that all three agents reuse the one browser you logged into. Verified against the real `agent-browser@0.19.0` and `@mastra/core` `BrowserConfigBase` type definitions during planning.
 
 **Queues**: BullMQ + Redis (kept as-is). Search queue produces jobs; jobs route to `easy-apply` or `external-apply` queue by `applyType`. Each queue's worker runs `concurrency: 1` — strictly one application at a time, matching "apply one by one."
 
@@ -153,8 +153,10 @@ Submit → screenshot → same `applications`/`jobs` status updates as Phase 3.
 
 ## Testing
 
-- Unit (`vitest`, kept): config schema validation, `profile.json` parsing, bail-ratio math, command router (tab context + input string → resolved handler), field-filling precedence logic (mocked LLM calls).
-- Component: TUI panels tested in isolation — confirm `@opentui/solid` supports headless/testable rendering during Phase 1 setup (equivalent to old `ink-testing-library` usage).
+**Runner: `bun test` (Bun's native runner), replacing vitest.** Confirmed during planning by actually installing `@opentui/core`/`@opentui/solid` and running a real component through both: vitest's default transform (oxc, as of vitest 4) rejects the `jsx: "preserve"` + `jsxImportSource: "@opentui/solid"` tsconfig combination Bun/opentui require ("Failed to parse source... make sure to not set jsx to preserve"). `bun test` renders and asserts against the same component with zero extra config — `@opentui/solid` ships a `bun-test-node` shim specifically for this. Old repo's `vitest`/`ink-testing-library` dependencies are dropped.
+
+- Unit: config schema validation, `profile.json` parsing, bail-ratio math, command router (tab context + input string → resolved handler), field-filling precedence logic (mocked LLM calls). Plain `bun:test` (`describe`/`test`/`expect`).
+- Component: TUI panels tested headless via `@opentui/solid`'s `testRender()` — mounts a component into a real (offscreen) terminal buffer, `captureCharFrame()` returns the rendered ASCII grid to assert against, `resize()` simulates terminal resize for responsive-layout tests.
 - No e2e tests against real LinkedIn (ToS risk, fragile). Phase 1's manual `bun run dev` walkthrough is the acceptance check for the shell + login flow; later phases get their own manual walkthroughs against real (or a throwaway) LinkedIn session rather than automated e2e.
 
 ## Build Order
