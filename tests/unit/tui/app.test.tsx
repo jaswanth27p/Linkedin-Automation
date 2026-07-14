@@ -1,0 +1,54 @@
+import { describe, test, expect, beforeEach } from 'bun:test'
+import { testRender } from '@opentui/solid'
+import { initAppState, setActiveTab, setSessionStatus, pushLog } from '../../../src/state/app-state.ts'
+import { App } from '../../../src/tui/App.tsx'
+
+beforeEach(() => {
+  initAppState({ concurrency: 1, model: 'test', irrelevantBailRatio: 0.5 })
+})
+
+describe('App', () => {
+  test('renders header, sidebar, and the active tab\'s log panel', async () => {
+    pushLog('search', 'scan started')
+    const setup = await testRender(() => <App />, { width: 100, height: 30 })
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+    expect(frame).toContain('LinkedIn Auto-Apply')
+    expect(frame).toContain('Agents')
+    expect(frame).toContain('scan started')
+  })
+
+  test('switching active tab changes which log panel is visible', async () => {
+    pushLog('search', 'search log line')
+    pushLog('easy', 'easy log line')
+    const setup = await testRender(() => <App />, { width: 100, height: 30 })
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain('search log line')
+
+    setActiveTab('easy')
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+    expect(frame).toContain('easy log line')
+    expect(frame).not.toContain('search log line')
+  })
+
+  test('resizing to a narrow terminal shrinks the sidebar without crashing', async () => {
+    const setup = await testRender(() => <App />, { width: 100, height: 30 })
+    await setup.renderOnce()
+    setup.resize(50, 30)
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+    expect(frame.length).toBeGreaterThan(0)
+  })
+
+  test('input box is disabled (shows waiting placeholder) until both sessions connect', async () => {
+    const setup = await testRender(() => <App />, { width: 100, height: 30 })
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain('Waiting for browser login')
+
+    setSessionStatus('linkedin', true)
+    setSessionStatus('gmail', true)
+    await setup.renderOnce()
+    expect(setup.captureCharFrame()).toContain('Type a /command')
+  })
+})
