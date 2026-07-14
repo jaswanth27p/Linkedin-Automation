@@ -1,0 +1,60 @@
+import { describe, test, expect, beforeEach } from 'bun:test'
+import {
+  initAppState,
+  appState,
+  setSessionStatus,
+  isUnlocked,
+  setActiveTab,
+  pushLog,
+  setAgentStatus,
+  setNeedsInput,
+} from '../../../src/state/app-state.ts'
+
+beforeEach(() => {
+  initAppState({ concurrency: 1, model: 'test-model', irrelevantBailRatio: 0.5 })
+})
+
+describe('app-state', () => {
+  test('starts locked with both sessions disconnected', () => {
+    expect(isUnlocked()).toBe(false)
+    expect(appState.session.linkedin).toBe(false)
+    expect(appState.session.gmail).toBe(false)
+  })
+
+  test('unlocks only when both linkedin and gmail are connected', () => {
+    setSessionStatus('linkedin', true)
+    expect(isUnlocked()).toBe(false)
+    setSessionStatus('gmail', true)
+    expect(isUnlocked()).toBe(true)
+  })
+
+  test('setActiveTab updates activeTab', () => {
+    setActiveTab('easy')
+    expect(appState.activeTab).toBe('easy')
+  })
+
+  test('pushLog appends to the given tab only', () => {
+    pushLog('search', 'scanning page 1')
+    expect(appState.tabs.search.logs).toEqual(['scanning page 1'])
+    expect(appState.tabs.easy.logs).toEqual([])
+  })
+
+  test('pushLog caps log history at MAX_LOGS_PER_TAB', () => {
+    for (let i = 0; i < 510; i++) pushLog('search', `line ${i}`)
+    expect(appState.tabs.search.logs.length).toBe(500)
+    expect(appState.tabs.search.logs[499]).toBe('line 509')
+  })
+
+  test('setAgentStatus updates status and step', () => {
+    setAgentStatus('easy', 'running', 'applying to job 3')
+    expect(appState.tabs.easy.status).toBe('running')
+    expect(appState.tabs.easy.step).toBe('applying to job 3')
+  })
+
+  test('setNeedsInput sets and clears the pending question', () => {
+    setNeedsInput('external', 'What is your visa status?')
+    expect(appState.tabs.external.needsInputQuestion).toBe('What is your visa status?')
+    setNeedsInput('external', null)
+    expect(appState.tabs.external.needsInputQuestion).toBeNull()
+  })
+})
