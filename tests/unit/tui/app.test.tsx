@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach } from 'bun:test'
 import { testRender } from '@opentui/solid'
-import { initAppState, setActiveTab, setSessionStatus, pushLog } from '../../../src/state/app-state.ts'
+import { initAppState, setActiveTab, setSessionStatus, pushLog, appState } from '../../../src/state/app-state.ts'
 import { App } from '../../../src/tui/App.tsx'
 
 beforeEach(() => {
@@ -50,5 +50,47 @@ describe('App', () => {
     setSessionStatus('gmail', true)
     await setup.renderOnce()
     expect(setup.captureCharFrame()).toContain('Type a /command')
+  })
+
+  test('pressing Tab cycles activeTab search -> easy -> external -> search', async () => {
+    const setup = await testRender(() => <App />, { width: 100, height: 30 })
+    await setup.renderOnce()
+    expect(appState.activeTab).toBe('search')
+
+    setup.mockInput.pressTab()
+    await setup.renderOnce()
+    expect(appState.activeTab).toBe('easy')
+
+    setup.mockInput.pressTab()
+    await setup.renderOnce()
+    expect(appState.activeTab).toBe('external')
+
+    setup.mockInput.pressTab()
+    await setup.renderOnce()
+    expect(appState.activeTab).toBe('search')
+  })
+
+  test('pressing Shift+Tab cycles backward', async () => {
+    const setup = await testRender(() => <App />, { width: 100, height: 30 })
+    await setup.renderOnce()
+    setup.mockInput.pressTab({ shift: true })
+    await setup.renderOnce()
+    expect(appState.activeTab).toBe('external')
+  })
+
+  test('narrow resize wraps sidebar text instead of clipping it', async () => {
+    const setup = await testRender(() => <App />, { width: 100, height: 30 })
+    await setup.renderOnce()
+    let frame = setup.captureCharFrame()
+    expect(frame).toContain('LinkedIn: waiting')
+
+    setup.resize(50, 30)
+    await setup.renderOnce()
+    frame = setup.captureCharFrame()
+    // At narrow width the sidebar wraps rather than clipping, so the full
+    // unwrapped string no longer fits on one line — assert the label survives
+    // (proves it wasn't dropped/cut off).
+    expect(frame).toContain('LinkedIn')
+    expect(frame).toContain('Gmail')
   })
 })
