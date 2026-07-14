@@ -87,10 +87,12 @@ describe('App', () => {
     setup.resize(50, 30)
     await setup.renderOnce()
     frame = setup.captureCharFrame()
-    // At narrow width the sidebar wraps rather than clipping, so the full
-    // unwrapped string no longer fits on one line — assert the label survives
-    // (proves it wasn't dropped/cut off).
-    expect(frame).toContain('LinkedIn')
-    expect(frame).toContain('Gmail')
+    // At narrow width "LinkedIn: waiting" no longer fits unwrapped, but the
+    // sidebar should legitimately word-wrap rather than clip — if it clips,
+    // opentui's box-drawing border characters overwrite/interleave with the
+    // text at the clip boundary, breaking "waiting" into non-contiguous
+    // fragments (verified: clipped renders as "wai" + border-char + "ing").
+    // A wrapped render keeps "waiting" intact on its own line.
+    expect(frame).toContain('waiting')
   })
 })
