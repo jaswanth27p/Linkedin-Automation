@@ -5,3 +5,5 @@ dist/
 .env
 data/
 docs/
+resume.md
+profile.json
