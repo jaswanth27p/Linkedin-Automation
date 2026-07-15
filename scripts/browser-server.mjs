@@ -51,8 +51,10 @@ function removeOwnProfile() {
 pruneOldProfiles()
 
 const browser = await chromium.launchPersistentContext(userDataDir, {
+  channel: 'chrome',
   headless: HEADLESS,
-  args: ['--no-sandbox', '--remote-debugging-port=0'],
+  args: ['--remote-debugging-port=0', '--disable-blink-features=AutomationControlled'],
+  ignoreDefaultArgs: ['--enable-automation'],
   noDefaultViewport: true,
 })
 

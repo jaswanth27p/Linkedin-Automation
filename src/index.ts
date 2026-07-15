@@ -10,6 +10,7 @@ import { registerBuiltinCommands } from './commands/index.ts'
 import { stopSearchAndWait } from './agents/search-agent.ts'
 import { stopEasyApplyWorker } from './queues/easy-apply-worker.ts'
 import { stopExternalApplyWorker } from './queues/external-apply-worker.ts'
+import { closeApplyQueues } from './queues/apply-queues.ts'
 import { mountTui, destroyTui } from './tui/index.tsx'
 
 let shuttingDown = false
@@ -28,6 +29,7 @@ async function cleanup() {
   await stopSearchAndWait()
   await stopEasyApplyWorker()
   await stopExternalApplyWorker()
+  await closeApplyQueues()
   await shutdownBrowserServer()
   await closeDb()
 }
@@ -56,7 +58,7 @@ async function main() {
   registerBuiltinCommands()
 
   await launchBootstrapBrowser('./data/browser-storage-state.json')
-  await openLoginTabs('https://www.linkedin.com/login')
+  await openLoginTabs('https://www.linkedin.com/login', 'https://mail.google.com/mail/')
 
   // Restored cookies usually mean we're already logged in — poll every 5s and
   // flip the session to unlocked automatically, so the user doesn't have to run

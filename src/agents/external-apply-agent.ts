@@ -79,7 +79,7 @@ function createAskHumanForVerificationTool() {
   return createTool({
     id: 'ask-human-for-verification',
     description:
-      "Ask the human for help with an email verification code (OTP) or confirmation link, a CAPTCHA, an SMS/2FA prompt, or any unrecognized signup/apply flow you cannot resolve yourself — you cannot read the candidate's email or phone. State clearly what you need (e.g. which email address and site a code was sent to). Waits for their typed reply. Unlike ask-human-and-remember, this answer is per-run and is never saved to profile.json — a verification code or a one-off confirmation is not a durable fact.",
+      "Ask the human for help with a CAPTCHA, an SMS/2FA prompt, or any unrecognized signup/apply flow you cannot resolve yourself. Do NOT use this for email OTPs or confirmation links — check the Gmail tab yourself first (see instructions). Only fall back to this tool if the Gmail tab doesn't have the email yet after waiting, or the email content is ambiguous. State clearly what you're stuck on. Waits for their typed reply. Unlike ask-human-and-remember, this answer is per-run and is never saved to profile.json — a verification code or a one-off confirmation is not a durable fact.",
     inputSchema: z.object({ question: z.string() }),
     outputSchema: z.object({ answer: z.string() }),
     execute: async ({ question }) => {
@@ -153,7 +153,7 @@ async function buildApplyInstructions(config: AppConfig, job: JobRecord): Promis
   const profile = await loadProfile(config.profileFiles.profile)
 
   return `
-You are completing a job application on an external (non-LinkedIn) careers site, in a real browser that already has a LinkedIn tab open and logged in.
+You are completing a job application on an external (non-LinkedIn) careers site, in a real browser that already has a LinkedIn tab open and logged in, and (usually) a Gmail tab open and logged in.
 
 Job: ${job.title} @ ${job.company}
 Apply URL: ${job.applyUrl}
@@ -171,7 +171,7 @@ Steps:
    b. Otherwise, call lookup-learned-answer with the exact on-page question text. If found is true, use that answer.
    c. Otherwise, if you can confidently infer the answer from the resume/profile content, answer it yourself.
    d. Otherwise — a genuine unknown — call ask-human-and-remember with the question.
-3. If the site requires email verification (a one-time code sent to profile.contact.email, or a confirmation link to click), call ask-human-for-verification with a question that states which email address was used and what's needed (the code, or confirmation that the link was clicked) — you cannot read the candidate's email yourself. Wait for the reply, then continue with it (enter the code, or proceed once told the link was clicked).
+3. If the site sends a one-time code or confirmation link to profile.contact.email: switch to the Gmail tab yourself (browser_tabs), open the newest email from the site (wait a few seconds and refresh if it hasn't arrived yet), and read the code or click the confirmation link directly — do not ask the human for this. Then switch back to the apply tab and continue. Only call ask-human-for-verification if the email still hasn't arrived after a reasonable wait, or its content is ambiguous.
 4. If you hit a CAPTCHA, SMS-only two-factor prompt, or any flow you don't recognize and cannot resolve, call ask-human-for-verification describing what you're stuck on, then continue with their guidance.
 5. Submit the application once all steps are complete.
 6. Call report-submission with success: true after a successful submission, or success: false with a short error if you get stuck in a way you cannot resolve. Call it exactly once, at the very end.
@@ -217,7 +217,18 @@ export async function processExternalApplyJob(jobId: string): Promise<void> {
     })
 
     pushLog(EXTERNAL_TAB, `Opening application: ${job.title} @ ${job.company}`)
-    await agent.generate(`Apply to this job now. Job detail/apply URL: ${jobRecord.applyUrl}`)
+    // Mastra's Agent.generate defaults maxSteps to 5 tool-call steps total — a
+    // real multi-field application (open, fill several fields, maybe account
+    // creation, Gmail OTP check, report-submission) blows past that easily, so
+    // without this the agent silently stops mid-form and the job gets written
+    // as failed even though nothing actually went wrong. Higher than easy-apply's
+    // cap since external sites add account creation + a Gmail tab-switch round
+    // trip for OTPs on top of the form itself. Not unbounded, though: this is the
+    // ONLY circuit breaker against a genuinely stuck agent (e.g. repeatedly
+    // retrying the same failed click) — the BullMQ worker (concurrency: 1) has no
+    // job timeout, so a runaway loop would burn tokens and block every other
+    // queued application indefinitely otherwise.
+    await agent.generate(`Apply to this job now. Job detail/apply URL: ${jobRecord.applyUrl}`, { maxSteps: 220 })
   } catch (err) {
     if (!ctx.reported) {
       const message = err instanceof Error ? err.message : String(err)

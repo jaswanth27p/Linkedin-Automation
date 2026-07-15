@@ -27,6 +27,9 @@ export function Sidebar() {
       <text fg={appState.session.linkedin ? theme.success : theme.textMuted}>
         LinkedIn: {appState.session.linkedin ? 'connected' : 'waiting'}
       </text>
+      <text fg={appState.session.gmail ? theme.success : theme.textMuted}>
+        Gmail: {appState.session.gmail ? 'connected' : 'waiting'}
+      </text>
 
       <text fg={theme.text}> </text>
       <text fg={theme.text} attributes={TextAttributes.BOLD}>Agents</text>

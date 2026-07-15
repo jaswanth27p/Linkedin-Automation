@@ -10,6 +10,7 @@ export interface TabState {
 
 export interface SessionStatus {
   linkedin: boolean
+  gmail: boolean
 }
 
 export interface Settings {

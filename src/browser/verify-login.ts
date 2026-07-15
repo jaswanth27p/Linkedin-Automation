@@ -6,19 +6,24 @@ let autoVerifyTimer: ReturnType<typeof setInterval> | null = null
 let ticking = false
 
 /**
- * Poll the bootstrap browser for LinkedIn login every `intervalMs` until it
- * reports logged-in, then flip the session state and stop. Because login is
- * usually already restored from the saved cookie file at startup, this normally
- * succeeds on the very first tick — the user rarely has to run /verify-login by
- * hand anymore. Safe to call once; a second call while already polling is a
- * no-op. Stops itself on the first success (does not keep re-checking after).
+ * Poll the bootstrap browser for LinkedIn (tab 0) and Gmail (tab 1) login every
+ * `intervalMs`. Unlock still gates on LinkedIn only — Gmail is optional, used
+ * later by the external-apply agent to read OTPs/verification links, so it
+ * never blocks the app. Keeps polling until BOTH are connected (not just
+ * LinkedIn) — LinkedIn usually restores instantly from the saved cookie file,
+ * while Gmail needs a fresh manual login every run, so stopping the timer the
+ * moment LinkedIn succeeds would miss Gmail finishing seconds/minutes later.
+ * The two local HTTP checks every tick are cheap, so leaving this running for
+ * a while is fine; falls back to /verify-login by hand if the user never logs
+ * into Gmail. Safe to call once; a second call while already polling is a
+ * no-op.
  */
 export function startLoginAutoVerify(intervalMs = 5000): void {
   if (autoVerifyTimer) return
 
   const tick = async () => {
     if (ticking) return
-    if (isUnlocked()) {
+    if (isUnlocked() && appState.session.gmail) {
       stopLoginAutoVerify()
       return
     }
@@ -30,13 +35,18 @@ export function startLoginAutoVerify(intervalMs = 5000): void {
       } catch {
         return // browser server not up yet; try again next tick
       }
-      const { linkedin } = await verifyLogin(port)
-      if (linkedin) {
+      const { linkedin, gmail } = await verifyLogin(port)
+      if (gmail && !appState.session.gmail) {
+        setSessionStatus('gmail', true)
+        pushLog(appState.activeTab, 'Login verified automatically: Gmail connected.')
+        logger.info('auto-verify: Gmail logged in')
+      }
+      if (linkedin && !appState.session.linkedin) {
         setSessionStatus('linkedin', true)
         pushLog(appState.activeTab, 'Login verified automatically: LinkedIn connected.')
         logger.info('auto-verify: LinkedIn logged in')
-        stopLoginAutoVerify()
       }
+      if (linkedin && gmail) stopLoginAutoVerify()
     } catch (err) {
       logger.warn({ err }, 'auto-verify: tick failed')
     } finally {
@@ -55,13 +65,14 @@ export function stopLoginAutoVerify(): void {
   }
 }
 
-export async function verifyLogin(serverPort: number): Promise<{ linkedin: boolean }> {
-  const res = await fetch(
-    `http://127.0.0.1:${serverPort}/page-url?tab=0`
-  ).then(r => r.json()).catch(() => ({ url: '' }))
+export async function verifyLogin(serverPort: number): Promise<{ linkedin: boolean; gmail: boolean }> {
+  const [linkedinRes, gmailRes] = await Promise.all([
+    fetch(`http://127.0.0.1:${serverPort}/page-url?tab=0`).then(r => r.json()).catch(() => ({ url: '' })),
+    fetch(`http://127.0.0.1:${serverPort}/page-url?tab=1`).then(r => r.json()).catch(() => ({ url: '' })),
+  ])
 
-  const pageUrl = (res.url || '').toLowerCase()
-  const loggedIn =
+  const pageUrl = (linkedinRes.url || '').toLowerCase()
+  const linkedin =
     pageUrl.includes('linkedin.com/feed') ||
     pageUrl.includes('linkedin.com/mynetwork') ||
     pageUrl.includes('linkedin.com/jobs') ||
@@ -69,5 +80,8 @@ export async function verifyLogin(serverPort: number): Promise<{ linkedin: boole
     pageUrl.includes('linkedin.com/notifications') ||
     (pageUrl.includes('linkedin.com') && !pageUrl.includes('/login') && !pageUrl.includes('/checkpoint'))
 
-  return { linkedin: loggedIn }
+  const gmailUrl = (gmailRes.url || '').toLowerCase()
+  const gmail = gmailUrl.includes('mail.google.com/mail/') && !gmailUrl.includes('/signin')
+
+  return { linkedin, gmail }
 }

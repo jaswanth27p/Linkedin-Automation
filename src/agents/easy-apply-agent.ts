@@ -197,7 +197,16 @@ export async function processEasyApplyJob(jobId: string): Promise<void> {
     })
 
     pushLog(EASY_TAB, `Opening application: ${job.title} @ ${job.company}`)
-    await agent.generate(`Apply to this job now. Job detail/apply URL: ${jobRecord.applyUrl}`)
+    // Mastra's Agent.generate defaults maxSteps to 5 tool-call steps total — a
+    // real multi-field application (open, fill several fields, maybe multiple
+    // Easy Apply pages, report-submission) blows past that easily, so without
+    // this the agent silently stops mid-form and the job gets written as
+    // failed even though nothing actually went wrong. Not set to something huge/
+    // unbounded, though: this is the ONLY circuit breaker against a genuinely
+    // stuck agent (e.g. repeatedly retrying the same failed click) — the BullMQ
+    // worker (concurrency: 1) has no job timeout, so a runaway loop would burn
+    // tokens and block every other queued application indefinitely otherwise.
+    await agent.generate(`Apply to this job now. Job detail/apply URL: ${jobRecord.applyUrl}`, { maxSteps: 150 })
   } catch (err) {
     if (!ctx.reported) {
       const message = err instanceof Error ? err.message : String(err)

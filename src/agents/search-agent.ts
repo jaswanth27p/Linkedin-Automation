@@ -87,7 +87,7 @@ export async function stopSearchAndWait(): Promise<void> {
 
 interface ScanRunContext {
   bailRatio: number
-  /** Hard cap on jobs opened this run — see computeContinueDecision. */
+  /** Hard cap on jobs opened this run — see computeMidPageContinueDecision. */
   maxJobsPerRun: number
   signal: AbortSignal
   scanned: number
@@ -150,8 +150,32 @@ async function logSearchStep(
   }
 }
 
-/** Pure so it's testable without a DB/queue in the loop. */
-export function computeContinueDecision(ctx: {
+/** Below this many scanned jobs, the bail ratio is not applied — a page has
+ * 10+ jobs, and 1 skip out of 1-2 scanned jobs is not a meaningful signal
+ * that the whole page is irrelevant. Without this floor a single early skip
+ * (ratio 1/1 or 1/2, both >= a typical 0.5 bailRatio) closed the tab after
+ * just one card. */
+const MIN_SCANNED_BEFORE_BAIL = 4
+
+/** Hard mid-page stop conditions only — abort or the per-run job cap. The
+ * bail ratio is deliberately NOT checked here: it's evaluated once per page,
+ * by computeNextPageDecision, so a couple of early skips never cut a page
+ * short before every card on it has been read. Pure so it's testable. */
+export function computeMidPageContinueDecision(ctx: {
+  scanned: number
+  aborted: boolean
+  /** Optional hard cap on jobs opened per run (LinkedIn rate-limit guard). Omit for no cap. */
+  maxJobsPerRun?: number
+}): boolean {
+  if (ctx.aborted) return false
+  if (ctx.maxJobsPerRun !== undefined && ctx.scanned >= ctx.maxJobsPerRun) return false
+  return true
+}
+
+/** Called once a page's cards are all scanned, to decide whether to load the
+ * next page/more results for this search URL, or stop here. Pure so it's
+ * testable without a DB/queue in the loop. */
+export function computeNextPageDecision(ctx: {
   scanned: number
   skipped: number
   bailRatio: number
@@ -163,7 +187,7 @@ export function computeContinueDecision(ctx: {
   // Rate-limit guard: once the run has opened its budget of jobs, stop — this
   // bounds how hard a single run hammers LinkedIn regardless of the bail ratio.
   if (ctx.maxJobsPerRun !== undefined && ctx.scanned >= ctx.maxJobsPerRun) return false
-  if (ctx.scanned === 0) return true
+  if (ctx.scanned < MIN_SCANNED_BEFORE_BAIL) return true
   return ctx.skipped / ctx.scanned < ctx.bailRatio
 }
 
@@ -191,7 +215,7 @@ function createReportJobVerdictTool(ctx: ScanRunContext) {
   return createTool({
     id: 'report-job-verdict',
     description:
-      "Report your relevance judgment for a job you just read. Call this exactly once per newly-opened job (never for one check-already-seen already marked seen). Returns whether to keep scanning this page.",
+      "Report your relevance judgment for a job you just read. Call this exactly once per newly-opened job (never for one check-already-seen already marked seen). Returns whether to keep scanning this page — this is only a hard stop (rate-limit cap or abort), NOT a relevance-ratio decision, so a skip verdict on its own never ends the page.",
     inputSchema: z.object({
       jobId: z.string(),
       title: z.string(),
@@ -252,10 +276,8 @@ function createReportJobVerdictTool(ctx: ScanRunContext) {
         )
       }
 
-      const shouldContinue = computeContinueDecision({
+      const shouldContinue = computeMidPageContinueDecision({
         scanned: ctx.scanned,
-        skipped: ctx.skipped,
-        bailRatio: ctx.bailRatio,
         aborted: ctx.signal.aborted,
         maxJobsPerRun: ctx.maxJobsPerRun,
       })
@@ -263,6 +285,33 @@ function createReportJobVerdictTool(ctx: ScanRunContext) {
         pushLog(SEARCH_TAB, `Reached the per-run limit of ${ctx.maxJobsPerRun} jobs — stopping this page to avoid overusing LinkedIn.`)
       }
       return { continue: shouldContinue }
+    },
+  })
+}
+
+function createCheckPageBailTool(ctx: ScanRunContext) {
+  return createTool({
+    id: 'check-page-bail',
+    description:
+      "Call this ONCE, after you have selected and reported every card currently in your traversal list for this page, and BEFORE loading more results — whether that means clicking a 'Next' pagination control or letting an infinite-scroll page load more cards. Decides whether this search URL is worth continuing based on how irrelevant the jobs scanned so far turned out to be. Do not call this mid-page, between cards.",
+    inputSchema: z.object({}),
+    outputSchema: z.object({ continueToNextPage: z.boolean() }),
+    execute: async () => {
+      const continueToNextPage = computeNextPageDecision({
+        scanned: ctx.scanned,
+        skipped: ctx.skipped,
+        bailRatio: ctx.bailRatio,
+        aborted: ctx.signal.aborted,
+        maxJobsPerRun: ctx.maxJobsPerRun,
+      })
+      if (!continueToNextPage && ctx.scanned > 0) {
+        const reason =
+          ctx.maxJobsPerRun !== undefined && ctx.scanned >= ctx.maxJobsPerRun
+            ? `reached the per-run limit of ${ctx.maxJobsPerRun} jobs`
+            : `${ctx.skipped}/${ctx.scanned} jobs scanned so far were irrelevant`
+        pushLog(SEARCH_TAB, `Stopping this search URL — ${reason}.`)
+      }
+      return { continueToNextPage }
     },
   })
 }
@@ -313,78 +362,89 @@ ${JSON.stringify(profile, null, 2)}
 Hiring requirements to match against:
 ${config.requirements}
 
-CRITICAL RULE: report-job-verdict is the ONLY way a job is recorded and queued. If you open a
+CRITICAL RULE: report-job-verdict is the ONLY way a job is recorded and queued. If you select a
 job and do NOT call report-job-verdict for it, that job is silently lost — all your reading was
-wasted. You MUST call report-job-verdict exactly once for every job you open, before you move on
-to the next card. Never open a job detail page without ending with a report-job-verdict call.
+wasted. You MUST call report-job-verdict exactly once for every job you select, before you move on
+to the next card.
 
-Process the cards STRICTLY ONE AT A TIME. Do not batch check-already-seen calls across many cards
-and then move on — finish a card completely (check → open → judge → report) before touching the
-next one.
+Process the cards STRICTLY ONE AT A TIME. Do not skim multiple cards and then go back — finish a
+card completely (check → select → judge → report) before touching the next one.
 
-=== HOW TO LIST JOBS RELIABLY (do this first) ===
-Do NOT try to scrape the job cards off the normal JavaScript /jobs/search results page — it lazy-
-loads, hides cards behind the auth-wall modal, and its DOM is unstable. Instead use LinkedIn's
-public guest-jobs listing endpoint, which returns a clean, static HTML fragment of exactly 10 job
-cards per request:
-
-  https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=<kw>&location=<loc>&f_TPR=<window>&sortBy=DD&start=<n>
-
-Build that URL from the search results URL you were given: copy its "keywords", "location", and
-"f_TPR" query params across verbatim (keep them URL-encoded), add "sortBy=DD" (freshest first) and
-"start=0". If the given URL has a "geoId" param, carry that across instead of/along with location —
-it is more precise. Navigate the browser to this guest URL (browser_goto), then read the returned
-HTML (browser snapshot, or browser_evaluate returning document.body.innerHTML) and pull one entry
-per <li> card:
-  - jobId: the digits in  data-entity-urn="urn:li:jobPosting:(\\d+)"  (this is the authoritative id —
-    prefer it over parsing the href).
-  - title: text of  <h3 class="base-search-card__title"> ... </h3>
-  - company: the <a> text inside  <h4 class="base-search-card__subtitle">
-  - location: text of  <span class="job-search-card__location">
-  - posted date: the datetime="YYYY-MM-DD" attribute of the card's <time> element (the class is
-    either job-search-card__listdate or job-search-card__listdate--new — accept both).
-  Collapse whitespace on every extracted string ( replace /\\s+/g with a single space, then trim ) —
-  the raw HTML is heavily indented.
-Pagination: page size is fixed at 10; there is no total-count field. To get more, refetch the same
-guest URL with start=10, start=20, ... Stop when a fetch returns fewer than 10 cards or you have
-enough. For a normal run, start=0 (the 10 freshest) is usually plenty.
-
-=== THEN PROCESS EACH LISTED JOB, STRICTLY ONE AT A TIME ===
-1. Pick the FIRST listed job you have not handled yet.
-2. Call check-already-seen with its jobId BEFORE opening anything. If seen is true, skip it — move to
-   the next job, no further action. (Do not call report-job-verdict for a seen job.)
-3. If not seen, open its detail page in the SAME logged-in browser at
-   https://www.linkedin.com/jobs/view/<jobId>/ . You must open it logged-in because the apply type
-   is only visible when authenticated: read the full description and detect apply type — "easy" if
-   there is an "Easy Apply" button, otherwise "external" (a plain "Apply" button that hands off to
-   the company's own site).
-4. Judge relevance against the resume, profile, and requirements above. Be reasonably selective —
-   skip jobs that clearly mismatch seniority, location, or the stated requirements.
-5. Call report-job-verdict with the jobId, title, company, location, sourceUrl (the search results
-   URL you were given), applyUrl (the canonical detail URL https://www.linkedin.com/jobs/view/<jobId>/ —
-   strip any ?position=...&trackingId=... tracking params), verdict ("relevant" or "skip"), applyType,
-   and a short reason. Mandatory for EVERY opened job — a "skip" verdict still requires the call.
-6. If report-job-verdict returns continue: false, stop immediately and finish your turn. Otherwise go
-   back to step 1 for the next unhandled job.
-7. If you hit a LinkedIn checkpoint, CAPTCHA, or any page that isn't the normal jobs UI, call
+=== HOW TO BROWSE JOBS (like a normal user, not an API) ===
+1. Open the given search results URL in a NEW browser tab (browser_tabs action "new", pointed at the
+   exact URL you were given) — do not modify it into a different endpoint, and do not reuse/navigate
+   the existing LinkedIn tab. This is the real LinkedIn Jobs search page: a left-hand column lists
+   job cards, and a right-hand pane shows the full detail/description of whichever card is currently
+   selected. Stay in this tab and interact with it purely by clicking, the way a person would —
+   never browser_goto to a different URL to "open" a job.
+2. Take a browser_snapshot of the page. In it, find the left-hand job list: it is an ordered list of
+   clickable job-card elements (each one's ref usually has a job title/company as its accessible
+   name, and each corresponds to an <li> with a "data-occludable-job-id" attribute in the real DOM).
+   Write down this list of refs, top to bottom, in order — this is your traversal order for the
+   current page, position 1 = the first card. The currently-selected card (position 1 on first load)
+   is visually/semantically marked active (e.g. aria-current="page", or a class containing "active"/
+   "selected" on it or its container) and its detail already shows in the right-hand pane.
+3. Read the selected card's detail from the right pane (title, company, location, full description,
+   and the apply button: "Easy Apply" means applyType "easy", any other "Apply" button that hands
+   off to an external site means applyType "external"). Get the job id from the "currentJobId" query
+   param in the tab's current URL; if the URL hasn't updated yet, use the selected card's
+   data-occludable-job-id (or data-job-id) attribute instead. Never invent a job id — if you truly
+   cannot extract one, skip this card and move to the next position anyway.
+4. Call check-already-seen with that jobId. If seen is true, skip it — no further action for this
+   card. (Do not call report-job-verdict for a seen job.)
+5. If not seen, judge relevance against the resume, profile, and requirements above using the detail
+   pane content already showing — do not open any separate page. Be reasonably selective — skip jobs
+   that clearly mismatch seniority, location, or the stated requirements.
+6. Call report-job-verdict with the jobId, title, company, location, sourceUrl (the search results
+   URL you were given), applyUrl (construct the canonical https://www.linkedin.com/jobs/view/<jobId>/
+   from the jobId — you don't need to have navigated there), verdict ("relevant" or "skip"),
+   applyType, and a short reason. Mandatory for EVERY selected job — a "skip" verdict still requires
+   the call. This call almost always returns continue: true — that's just a hard rate-limit/abort
+   check, NOT a relevance judgment, so a "skip" verdict never by itself ends the page. If it ever
+   returns continue: false, stop entirely: close this tab (browser_tabs action "close") and finish
+   your turn immediately, skipping the rest of the steps below.
+7. Otherwise — continue: true, the normal case — you are NOT done. Advance to the NEXT position in
+   your traversal list from step 2 (position 2, then 3, then 4, ...) and browser_click that card's
+   ref to select it. This updates the right pane and the currentJobId in place, no page reload. Go
+   back to step 3 for this newly-selected card. Do this for EVERY remaining card on the page, one at
+   a time, without stopping in between and regardless of how many skips you've hit in a row —
+   reaching the end of the traversal list, not any single verdict, is what ends this page.
+8. Once you have selected and reported every card that was in your step-2 traversal list (the whole
+   page, not a subset), call check-page-bail exactly once. This looks at how irrelevant the jobs on
+   THIS page turned out to be overall and decides whether continuing to more results for this search
+   URL is worth it.
+   - If continueToNextPage is false, close this tab (browser_tabs action "close") and finish your
+     turn — do not load more pages for this search URL.
+   - If continueToNextPage is true, take a fresh browser_snapshot: if the left-hand list now shows
+     more cards than before (LinkedIn infinite-scrolls more in), re-run step 2 to build a new
+     traversal list starting after the last card you already handled, and keep going. If instead
+     there's a pagination control at the bottom (e.g. a "Next"/page-number button), click it to load
+     the next page of results in this SAME tab, then start over from step 2 for the new page. If
+     there is no more content and no next-page control, close this tab (browser_tabs action "close")
+     and finish your turn.
+9. If you hit a LinkedIn checkpoint, CAPTCHA, or any page that isn't the normal jobs search UI, call
    request-human-input with a clear question describing what you're stuck on, then wait for the
    answer before continuing.
 
-Notes / gotchas:
-- The guest listing endpoint is anonymous and cheap; the per-job detail page must be the normal
-  logged-in /jobs/view/<jobId>/ page so you can see the real apply button.
-- If the guest endpoint ever returns an empty body or a non-jobs page, fall back to reading the job
-  cards off the given /jobs/search URL directly, but still get each jobId from the
-  urn:li:jobPosting:(\\d+) pattern in the card link.
-- Never invent a jobId — if you cannot extract a numeric id for a card, skip that card.
-- Be economical with page loads. There is an automatic, enforced pause after every navigation to
-  stay under LinkedIn's automation limits — you do not need to add your own waits, but you SHOULD
-  avoid redundant navigations: read everything you need from a page in one pass, don't re-open a
-  page you already read, and don't reload the listing between jobs. Fewer, purposeful navigations
-  keep the account safe.
+DO NOT STOP after just the first (auto-selected) card, after a skip verdict, or after just one page.
+Finishing every card on a page before ever calling check-page-bail, and continuing to the next page
+when it says to, is the default behavior — the ONLY things that legitimately end this search URL are:
+report-job-verdict returning continue: false (hard rate-limit/abort stop, can happen mid-page),
+check-page-bail returning continueToNextPage: false (checked only once a whole page is done), running
+out of both cards and a next-page control, or getting stuck badly enough to need request-human-input.
 
-Work through as many jobs as you can within these rules, then stop. Before you finish your turn,
-double-check: did you call report-job-verdict once for every job you opened? If not, do it now.
+Notes / gotchas:
+- Selecting a card (browser_click) is paced the same as opening a page — there's an automatic,
+  enforced pause after it before your next step runs, the same way a real person would pause to read
+  before clicking the next job. You don't need to add your own waits.
+- Be economical: read everything you need for a card from the already-visible detail pane in one
+  pass, don't re-select a card you already judged, and don't reload the search results between jobs.
+  Fewer, purposeful actions keep the account safe.
+
+Work through the ENTIRE page, and the next page after that (per the rules above), stopping only per
+the conditions listed. Before you finish your turn, double-check: did you call report-job-verdict
+once for every card you selected, and did you actually reach one of the legitimate stop conditions
+rather than just pausing after one job? If not, keep going.
 `.trim()
 }
 
@@ -440,6 +500,7 @@ async function runSearchUrlsInner(config: AppConfig, urls: string[]): Promise<Se
       tools: {
         checkAlreadySeen: createCheckAlreadySeenTool(ctx),
         reportJobVerdict: createReportJobVerdictTool(ctx),
+        checkPageBail: createCheckPageBailTool(ctx),
         requestHumanInput: createRequestHumanInputTool(),
       },
     })
@@ -457,6 +518,13 @@ async function runSearchUrlsInner(config: AppConfig, urls: string[]): Promise<Se
         await agent.generate(`Search results URL to scan: ${url}`, {
           abortSignal: abort.signal,
           onStepFinish: (event) => logSearchStep(event, abort.signal),
+          // Mastra's Agent.generate defaults maxSteps to 5 tool-call steps total —
+          // nowhere near enough to click through a page of job cards (each card is
+          // several steps: snapshot, check-already-seen, report-job-verdict, click
+          // next). Without this the agent silently stopped after ~1 job per URL.
+          // Budget generously per job scanned this run, with a floor so a low
+          // maxJobsPerRun setting doesn't reintroduce the cap.
+          maxSteps: Math.max(80, appState.settings.maxJobsPerRun * 10),
         })
       } catch (err) {
         if (abort.signal.aborted) {

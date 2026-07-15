@@ -63,16 +63,24 @@ export function registerGlobalCommands(): void {
   registerCommand({
     name: 'verify-login',
     scope: 'global',
-    description: 'Check LinkedIn login status in the bootstrap browser',
+    description: 'Check LinkedIn and Gmail login status in the bootstrap browser',
     run: async () => {
       const port = getBrowserServerPort()
       const result = await verifyLogin(port)
       setSessionStatus('linkedin', result.linkedin)
-      if (result.linkedin) {
-        pushLog(appState.activeTab, 'Login verified: LinkedIn connected.')
-      } else {
-        pushLog(appState.activeTab, 'Not logged in yet. Log in in the browser window, then run /verify-login again.')
-      }
+      setSessionStatus('gmail', result.gmail)
+      pushLog(
+        appState.activeTab,
+        result.linkedin
+          ? 'Login verified: LinkedIn connected.'
+          : 'Not logged in yet (LinkedIn). Log in in tab 1, then run /verify-login again.',
+      )
+      pushLog(
+        appState.activeTab,
+        result.gmail
+          ? 'Login verified: Gmail connected.'
+          : 'Not logged in yet (Gmail). Log in in tab 2 — only needed for OTPs/verification links on external apply sites.',
+      )
     },
   })
 

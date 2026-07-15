@@ -26,3 +26,14 @@ export async function getApplyQueueCounts(applyType: ApplyType): Promise<{ waiti
   const counts = await queue.getJobCounts('waiting', 'active')
   return { waiting: counts.waiting ?? 0, active: counts.active ?? 0 }
 }
+
+/** Each Queue lazily created above opens its own ioredis connection that keeps
+ * the process alive on its own — a BullMQ Worker being closed does NOT close
+ * the separate producer-side Queue connection. Must be called on shutdown or
+ * the process hangs after /exit (only escapable via Ctrl+C) whenever a job was
+ * ever enqueued or a queue count was checked that session. */
+export async function closeApplyQueues(): Promise<void> {
+  await Promise.all([easyQueue?.close(), externalQueue?.close()])
+  easyQueue = null
+  externalQueue = null
+}

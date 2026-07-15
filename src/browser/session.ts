@@ -103,8 +103,12 @@ export function getBrowserServerPort(): number {
   return serverPort
 }
 
-export async function openLoginTabs(linkedinUrl: string): Promise<void> {
+export async function openLoginTabs(linkedinUrl: string, gmailUrl: string): Promise<void> {
+  // tab 0: navigates the default tab the browser opens with.
   await httpGet(`/navigate?url=${encodeURIComponent(linkedinUrl)}`)
+  // tab 1: a fresh tab for Gmail, so the external-apply agent can switch to it
+  // later to read OTPs/verification links without disturbing the LinkedIn tab.
+  await httpGet(`/newtab?url=${encodeURIComponent(gmailUrl)}`)
 }
 
 export async function shutdownBrowserServer(): Promise<void> {

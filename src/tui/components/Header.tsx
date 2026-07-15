@@ -4,8 +4,8 @@ import { theme } from '../theme.ts'
 export function Header() {
   const statusText = () => {
     const s = appState.session
-    if (s.linkedin) return 'LinkedIn connected'
-    return 'Waiting for login: LinkedIn'
+    if (!s.linkedin) return 'Waiting for login: LinkedIn'
+    return s.gmail ? 'LinkedIn + Gmail connected' : 'LinkedIn connected (Gmail not linked)'
   }
 
   return (
