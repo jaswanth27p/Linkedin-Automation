@@ -4,6 +4,7 @@ import { appState, setSessionStatus, setActiveTab, setSetting, pushLog, TAB_IDS 
 import type { TabId, Settings } from '../state/types.ts'
 import { getBrowserServerPort } from '../browser/session.ts'
 import { verifyLogin } from '../browser/verify-login.ts'
+import { openTabPicker } from '../tui/components/TabPicker.tsx'
 
 export function registerGlobalCommands(): void {
   registerCommand({
@@ -19,10 +20,15 @@ export function registerGlobalCommands(): void {
   registerCommand({
     name: 'tab',
     scope: 'global',
-    description: '/tab search|easy|external — switch active tab',
+    description: '/tab [search|easy|external] — switch tab (no arg opens a picker)',
     run: (ctx) => {
       const target = ctx.args[0] as TabId | undefined
-      if (!target || !TAB_IDS.includes(target)) {
+      // No argument → open the centered picker dialog.
+      if (!target) {
+        openTabPicker()
+        return
+      }
+      if (!TAB_IDS.includes(target)) {
         pushLog(appState.activeTab, `Usage: /tab ${TAB_IDS.join('|')}`)
         return
       }
@@ -33,15 +39,21 @@ export function registerGlobalCommands(): void {
   registerCommand({
     name: 'set',
     scope: 'global',
-    description: '/set <concurrency|model|irrelevantBailRatio> <value>',
+    description: '/set <concurrency|model|irrelevantBailRatio|maxJobsPerRun|minNavDelayMs|maxNavDelayMs> <value>',
     run: (ctx) => {
       const [key, ...rest] = ctx.args
       const value = rest.join(' ')
       if (key === 'concurrency') setSetting('concurrency', Number(value))
       else if (key === 'model') setSetting('model', value)
       else if (key === 'irrelevantBailRatio') setSetting('irrelevantBailRatio', Number(value))
+      else if (key === 'maxJobsPerRun') setSetting('maxJobsPerRun', Number(value))
+      else if (key === 'minNavDelayMs') setSetting('minNavDelayMs', Number(value))
+      else if (key === 'maxNavDelayMs') setSetting('maxNavDelayMs', Number(value))
       else {
-        pushLog(appState.activeTab, `Unknown setting: ${key}. Use concurrency, model, or irrelevantBailRatio.`)
+        pushLog(
+          appState.activeTab,
+          `Unknown setting: ${key}. Use concurrency, model, irrelevantBailRatio, maxJobsPerRun, minNavDelayMs, or maxNavDelayMs.`,
+        )
         return
       }
       pushLog(appState.activeTab, `Set ${key} = ${value}`)
@@ -70,8 +82,10 @@ export function registerGlobalCommands(): void {
     description: 'Close the browser and exit the application',
     run: async () => {
       pushLog(appState.activeTab, 'Shutting down...')
-      const { shutdownBrowserServer } = await import('../browser/session.ts')
-      await shutdownBrowserServer()
+      // Only destroy the TUI here — main()'s cleanup() (awaiting mountTui())
+      // then stops the search agent, both queue workers, and the browser in
+      // the correct order. Shutting the browser down here directly used to
+      // race with cleanup() doing the same thing out of order.
       const { destroyTui } = await import('../tui/index.tsx')
       destroyTui()
     },

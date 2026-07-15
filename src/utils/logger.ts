@@ -1,6 +1,5 @@
 import pino, { type Logger } from 'pino'
 import { mkdirSync } from 'node:fs'
-import { createWriteStream } from 'node:fs'
 import pinoPretty from 'pino-pretty'
 
 const DATA_DIR = './data'
@@ -15,9 +14,18 @@ let _logger: Logger | null = null
 export function createLogger(): Logger {
   ensureDataDir()
 
-  const prettyStream = pinoPretty({ colorize: false })
-  const fileStream = createWriteStream(LOG_FILE, { flags: 'a' })
-  prettyStream.pipe(fileStream)
+  // CRITICAL: logs must NEVER touch stdout. opentui owns the terminal while the
+  // TUI is running, so any stray stdout write interleaves with its frames —
+  // log lines appear below/over the TUI and the whole layout looks broken until
+  // a resize forces a full repaint. `pinoPretty()` with no `destination`
+  // defaults to process.stdout, which was exactly the bug. Route pino-pretty
+  // straight to the log file instead — nothing goes to stdout.
+  const prettyStream = pinoPretty({
+    colorize: false,
+    destination: LOG_FILE,
+    append: true,
+    mkdir: true,
+  })
 
   _logger = pino(prettyStream)
   return _logger

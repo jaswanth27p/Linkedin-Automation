@@ -1,7 +1,11 @@
 import { registerGlobalCommands } from './global-commands.ts'
-import { registerStubCommands } from './stub-commands.ts'
+import { registerSearchCommands } from './search-commands.ts'
+import { registerEasyCommands } from './easy-commands.ts'
+import { registerExternalCommands } from './external-commands.ts'
 
 export function registerBuiltinCommands(): void {
   registerGlobalCommands()
-  registerStubCommands()
+  registerSearchCommands()
+  registerEasyCommands()
+  registerExternalCommands()
 }

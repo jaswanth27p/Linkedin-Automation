@@ -19,7 +19,7 @@ function initialState(settings: Settings): AppState {
 }
 
 export let [appState, setAppStateInternal] = createStore<AppState>(
-  initialState({ concurrency: 1, model: '', irrelevantBailRatio: 0.5 }),
+  initialState({ concurrency: 1, model: '', irrelevantBailRatio: 0.5, maxJobsPerRun: 25, minNavDelayMs: 3000, maxNavDelayMs: 8000 }),
 )
 
 export function initAppState(settings: Settings): void {

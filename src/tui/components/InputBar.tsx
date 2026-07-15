@@ -3,6 +3,7 @@ import { theme } from '../theme.ts'
 import { listCommandsForTab } from '../../commands/registry.ts'
 import { dispatchCommand } from '../../commands/dispatch.ts'
 import { appState } from '../../state/app-state.ts'
+import { answerPrompt } from '../../state/prompt-channel.ts'
 import type { Command } from '../../commands/types.ts'
 
 export let [suggestions, setSuggestions] = createSignal<Command[]>([])
@@ -21,16 +22,38 @@ function filterCommands(raw: string): Command[] {
   return cmds.filter(c => c.name.startsWith(query))
 }
 
-const MAX_SUGGESTIONS = 8
+// How many suggestion rows are visible at once. The full list is always
+// navigable — the window slides to keep the selected row in view rather than
+// truncating with a "+N more" note.
+const VISIBLE_SUGGESTIONS = 5
 
 export function SuggestionBox() {
-  const rows = createMemo(() =>
-    suggestions().slice(0, MAX_SUGGESTIONS).map((cmd, i) => ({
-      cmd,
-      i,
-      selected: i === selectedSuggestionIndex(),
-    }))
-  )
+  // First index of the visible window. Slides so the selected row stays on
+  // screen: when selection moves past the bottom, the window shifts down (the
+  // selected row sits on the last visible line); it never scrolls past the ends.
+  const windowStart = createMemo(() => {
+    const n = suggestions().length
+    const sel = selectedSuggestionIndex()
+    const eff = sel < 0 ? 0 : sel
+    const maxStart = Math.max(0, n - VISIBLE_SUGGESTIONS)
+    let start = eff - VISIBLE_SUGGESTIONS + 1
+    if (start < 0) start = 0
+    if (start > maxStart) start = maxStart
+    return start
+  })
+
+  const rows = createMemo(() => {
+    const start = windowStart()
+    return suggestions()
+      .slice(start, start + VISIBLE_SUGGESTIONS)
+      .map((cmd, k) => {
+        const i = start + k
+        return { cmd, i, selected: i === selectedSuggestionIndex() }
+      })
+  })
+
+  const hasAbove = createMemo(() => windowStart() > 0)
+  const hasBelow = createMemo(() => windowStart() + VISIBLE_SUGGESTIONS < suggestions().length)
 
   return (
     <Show when={suggestions().length > 0}>
@@ -43,7 +66,7 @@ export function SuggestionBox() {
         paddingLeft={1}
         paddingRight={1}
         flexDirection="column"
-        maxHeight={MAX_SUGGESTIONS + 2}
+        maxHeight={VISIBLE_SUGGESTIONS + 2}
       >
         <For each={rows()}>
           {(row) => (
@@ -55,7 +78,7 @@ export function SuggestionBox() {
               }}
             >
               <text fg={row.selected ? theme.accent : theme.textMuted}>
-                {row.selected ? '▌' : ' '}
+                {row.selected ? '▌' : hasAbove() && row.i === windowStart() ? '↑' : hasBelow() && row.i === windowStart() + VISIBLE_SUGGESTIONS - 1 ? '↓' : ' '}
               </text>
               <text fg={row.selected ? theme.accent : theme.textMuted}>
                 /{row.cmd.name}
@@ -64,11 +87,6 @@ export function SuggestionBox() {
             </box>
           )}
         </For>
-        <Show when={suggestions().length > MAX_SUGGESTIONS}>
-          <text fg={theme.textMuted}>
-            ...and {suggestions().length - MAX_SUGGESTIONS} more
-          </text>
-        </Show>
       </box>
     </Show>
   )
@@ -76,9 +94,14 @@ export function SuggestionBox() {
 
 export function InputBar(props: { onSubmit: (value: string) => void; disabled?: boolean }) {
   const [value, setValue] = createSignal('')
+  const pendingQuestion = createMemo(() => appState.tabs[appState.activeTab].needsInputQuestion)
 
   const handleInput = (v: string) => {
     setValue(v)
+    if (pendingQuestion()) {
+      setSuggestions([])
+      return
+    }
     const matches = filterCommands(v)
     setSuggestions(matches)
     setSelectedSuggestionIndex(-1)
@@ -90,12 +113,23 @@ export function InputBar(props: { onSubmit: (value: string) => void; disabled?: 
     <box border borderColor={theme.border} height={3} paddingLeft={1} paddingRight={1}>
       <input
         value={value()}
-        placeholder={props.disabled ? 'Waiting for browser login...' : 'Type / for commands'}
+        placeholder={
+          pendingQuestion()
+            ? `? ${pendingQuestion()}`
+            : props.disabled
+              ? 'Waiting for browser login...'
+              : 'Type / for commands'
+        }
         onInput={handleInput}
         onSubmit={() => {
           const v = value().trim()
           if (!v) return
-          props.onSubmit(v)
+          const question = pendingQuestion()
+          if (question) {
+            answerPrompt(appState.activeTab, v)
+          } else {
+            props.onSubmit(v)
+          }
           setValue('')
           dismissSuggestions()
         }}

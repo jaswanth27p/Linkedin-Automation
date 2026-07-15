@@ -11,7 +11,7 @@ import {
 } from '../../../src/state/app-state.ts'
 
 beforeEach(() => {
-  initAppState({ concurrency: 1, model: 'test-model', irrelevantBailRatio: 0.5 })
+  initAppState({ concurrency: 1, model: 'test-model', irrelevantBailRatio: 0.5, maxJobsPerRun: 25, minNavDelayMs: 3000, maxNavDelayMs: 8000 })
 })
 
 describe('app-state', () => {

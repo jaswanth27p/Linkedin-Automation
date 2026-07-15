@@ -1,8 +1,9 @@
-// Stub: mastra module will be implemented in Task 5
-export interface Page {
-  screenshot(options: { path: string }): Promise<void>
-}
+import { Mastra } from '@mastra/core'
+import { PostgresStore } from '@mastra/pg'
 
-export async function getBrowserPage(): Promise<Page> {
-  throw new Error('getBrowserPage not implemented - mastra module will be ready in Task 5')
-}
+// Central Mastra initialization. PostgresStore needs an `id` in its config
+// (easy to miss). `storage` is also exported standalone in case something needs
+// the store directly without going through the `mastra` instance.
+export const storage = new PostgresStore({ id: 'linkedin-auto', connectionString: process.env.DATABASE_URL! })
+
+export const mastra = new Mastra({ storage })

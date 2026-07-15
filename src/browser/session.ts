@@ -62,9 +62,34 @@ export async function launchBootstrapBrowser(storageStatePath: string): Promise<
     if (cdpData.cdpUrl) {
       sharedCdpUrl = cdpData.cdpUrl
       logger.info({ cdpUrl: sharedCdpUrl }, 'CDP URL captured for shared browser access')
+      // Verify the endpoint is actually reachable NOW. agent-browser's
+      // connectOverCDP swallows the real connection error and reports only a
+      // generic "Failed to connect via CDP" — so probe /json/version here and
+      // log the true result, otherwise the first search silently dead-ends.
+      await verifyCdpReachable(sharedCdpUrl)
+    } else {
+      logger.error({ cdpData }, 'browser-server returned no cdpUrl — agents will not be able to attach to the browser')
     }
   } catch (err) {
     logger.warn({ err }, 'Could not fetch CDP URL — shared browser access via CDP will not be available')
+  }
+}
+
+/** Probe Chromium's DevTools HTTP endpoint so a broken CDP setup fails loudly at startup instead of at first search. */
+async function verifyCdpReachable(cdpUrl: string): Promise<void> {
+  try {
+    const res = await fetch(`${cdpUrl}/json/version`)
+    const body = (await res.json()) as { webSocketDebuggerUrl?: string }
+    if (body.webSocketDebuggerUrl) {
+      logger.info({ ws: body.webSocketDebuggerUrl }, 'CDP endpoint reachable (/json/version OK) — agents can attach')
+    } else {
+      logger.warn({ body }, 'CDP /json/version returned no webSocketDebuggerUrl — agents may fail to attach')
+    }
+  } catch (err) {
+    logger.error(
+      { err, cdpUrl },
+      'CDP endpoint NOT reachable at startup — agent browsers will fail to attach. Chromium may not have opened its remote-debugging port.',
+    )
   }
 }
 

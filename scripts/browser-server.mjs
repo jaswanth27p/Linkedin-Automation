@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 import { chromium } from 'playwright-core'
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync, statSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -8,8 +8,47 @@ const PORT = parseInt(process.env.BROWSER_SERVER_PORT || '0', 10)
 const HEADLESS = process.env.LAUNCH_HEADLESS === '1'
 const STORAGE_STATE = process.env.STORAGE_STATE_PATH || ''
 
-const userDataDir = join(tmpdir(), `linkedin-auto-${Date.now()}`)
+const PROFILE_PREFIX = 'linkedin-auto-'
+const userDataDir = join(tmpdir(), `${PROFILE_PREFIX}${Date.now()}`)
 process.stderr.write(`[browser-server] userDataDir: ${userDataDir}\n`)
+
+// Each launch uses a fresh temp profile dir; login is persisted separately via
+// STORAGE_STATE cookies, so old dirs are dead weight. Prune leftovers from prior
+// runs at startup. Age-guarded (only dirs untouched for >1h) so a second app
+// instance's just-created profile is never deleted out from under it, and we
+// never touch our own current dir. Best-effort — failures are ignored.
+function pruneOldProfiles() {
+  const base = tmpdir()
+  const cutoff = Date.now() - 60 * 60 * 1000 // 1 hour
+  let removed = 0
+  try {
+    for (const name of readdirSync(base)) {
+      if (!name.startsWith(PROFILE_PREFIX)) continue
+      const full = join(base, name)
+      if (full === userDataDir) continue
+      try {
+        if (statSync(full).mtimeMs < cutoff) {
+          rmSync(full, { recursive: true, force: true })
+          removed++
+        }
+      } catch {}
+    }
+  } catch {}
+  if (removed > 0) process.stderr.write(`[browser-server] pruned ${removed} old profile dir(s)\n`)
+}
+
+// Remove our own profile dir. Called after the browser is closed on a clean
+// shutdown, so frequent restarts don't accumulate dirs. On Windows Chromium may
+// briefly hold file locks — the try/catch swallows an EBUSY and the age-based
+// prune above sweeps it on a later run.
+function removeOwnProfile() {
+  try {
+    rmSync(userDataDir, { recursive: true, force: true })
+    process.stderr.write(`[browser-server] removed own profile dir\n`)
+  } catch {}
+}
+
+pruneOldProfiles()
 
 const browser = await chromium.launchPersistentContext(userDataDir, {
   headless: HEADLESS,
@@ -50,11 +89,11 @@ if (STORAGE_STATE && existsSync(STORAGE_STATE)) {
   }
 }
 
-function saveState() {
+async function saveState() {
   if (!STORAGE_STATE) return
   try {
     mkdirSync(dirname(STORAGE_STATE), { recursive: true })
-    const cookies = browser.cookies()
+    const cookies = await browser.cookies()
     writeFileSync(STORAGE_STATE, JSON.stringify({ cookies }))
   } catch {}
 }
@@ -97,7 +136,7 @@ const server = createServer(async (req, res) => {
     }
 
     if (url.pathname === '/state') {
-      saveState()
+      await saveState()
       res.writeHead(200, { 'Content-Type': 'application/json' })
       return res.end(JSON.stringify({ ok: true }))
     }
@@ -140,10 +179,11 @@ const server = createServer(async (req, res) => {
 
     if (url.pathname === '/close') {
       process.stderr.write(`[browser-server] received /close\n`)
-      saveState()
+      await saveState()
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: true }))
       await browser.close()
+      removeOwnProfile()
       process.stderr.write(`[browser-server] browser closed, exiting\n`)
       process.exit(0)
       return
@@ -167,15 +207,17 @@ server.listen(PORT, '127.0.0.1', () => {
 
 process.on('SIGINT', async () => {
   process.stderr.write(`[browser-server] SIGINT\n`)
-  saveState()
+  await saveState()
   await browser.close()
+  removeOwnProfile()
   process.exit(0)
 })
 
 process.on('SIGTERM', async () => {
   process.stderr.write(`[browser-server] SIGTERM\n`)
-  saveState()
+  await saveState()
   await browser.close()
+  removeOwnProfile()
   process.exit(0)
 })
 

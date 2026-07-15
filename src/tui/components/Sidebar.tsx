@@ -12,7 +12,17 @@ const TAB_LABELS: Record<TabId, string> = {
 
 export function Sidebar() {
   return (
-    <scrollbox border borderColor={theme.border} width="100%" flexDirection="column" padding={1} scrollY>
+    <scrollbox
+      border
+      borderColor={theme.border}
+      width="100%"
+      flexGrow={1}
+      minHeight={0}
+      padding={1}
+      scrollY
+      viewportCulling={false}
+      contentOptions={{ flexDirection: 'column' }}
+    >
       <text fg={theme.text} attributes={TextAttributes.BOLD}>Session</text>
       <text fg={appState.session.linkedin ? theme.success : theme.textMuted}>
         LinkedIn: {appState.session.linkedin ? 'connected' : 'waiting'}
