@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'bun:test'
-import { computeMidPageContinueDecision, computeNextPageDecision } from '../../../src/agents/search-agent.ts'
+import { computeMidPageContinueDecision, computeNextPageDecision, buildScanInstructions } from '../../../src/agents/search-agent.ts'
+import { loadConfig } from '../../../src/config/loader.ts'
 
 describe('computeMidPageContinueDecision', () => {
   test('continues regardless of skip ratio', () => {
@@ -65,5 +66,14 @@ describe('computeNextPageDecision', () => {
 
   test('no cap applied when maxJobsPerRun is omitted', () => {
     expect(computeNextPageDecision({ scanned: 1000, skipped: 0, bailRatio: 0.5, aborted: false })).toBe(true)
+  })
+})
+
+describe('buildScanInstructions', () => {
+  test('judges relevance by substance over literal title, and requests interactiveOnly snapshots', async () => {
+    const config = await loadConfig('./linkedin-auto.config.ts')
+    const instructions = await buildScanInstructions(config)
+    expect(instructions).toContain('Judge by substance, not literal title match')
+    expect(instructions).toContain('interactiveOnly: true')
   })
 })

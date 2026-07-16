@@ -346,7 +346,7 @@ function createReturnUrlsTool(collected: string[]) {
   })
 }
 
-async function buildScanInstructions(config: AppConfig): Promise<string> {
+export async function buildScanInstructions(config: AppConfig): Promise<string> {
   const resume = await loadResume(config.profileFiles.resume)
   const profile = await loadProfile(config.profileFiles.profile)
 
@@ -393,8 +393,14 @@ card completely (check → select → judge → report) before touching the next
 4. Call check-already-seen with that jobId. If seen is true, skip it — no further action for this
    card. (Do not call report-job-verdict for a seen job.)
 5. If not seen, judge relevance against the resume, profile, and requirements above using the detail
-   pane content already showing — do not open any separate page. Be reasonably selective — skip jobs
-   that clearly mismatch seniority, location, or the stated requirements.
+   pane content already showing — do not open any separate page. Judge by substance, not literal title match:
+   a job counts as relevant if its actual responsibilities/stack overlap meaningfully with the
+   candidate's real skills and experience, even if the job title itself differs from anything in the
+   candidate's history (e.g. a "Platform Engineer" posting that's really full-stack TypeScript work is
+   relevant to a "Full Stack Developer" candidate whose stack matches). Weigh the candidate's
+   demonstrated skills more heavily than title wording when deciding overlap. Still be reasonably
+   selective on the requirements text's hard constraints — skip jobs that clearly mismatch seniority,
+   location, or stated experience-range requirements.
 6. Call report-job-verdict with the jobId, title, company, location, sourceUrl (the search results
    URL you were given), applyUrl (construct the canonical https://www.linkedin.com/jobs/view/<jobId>/
    from the jobId — you don't need to have navigated there), verdict ("relevant" or "skip"),
@@ -440,6 +446,12 @@ Notes / gotchas:
 - Be economical: read everything you need for a card from the already-visible detail pane in one
   pass, don't re-select a card you already judged, and don't reload the search results between jobs.
   Fewer, purposeful actions keep the account safe.
+- Token economy matters too, not just navigation pacing: only take a fresh browser_snapshot when you
+  actually need the traversal-list refs (start of a page, or after new cards load in) — after clicking
+  a card, read its detail straight from the click result / already-visible pane rather than
+  re-snapshotting the whole page. When you do need a snapshot, pass interactiveOnly: true unless you
+  specifically need descriptive text — the full accessibility tree of a busy jobs page is the single
+  biggest cost in this conversation, and it compounds across every card on the page.
 
 Work through the ENTIRE page, and the next page after that (per the rules above), stopping only per
 the conditions listed. Before you finish your turn, double-check: did you call report-job-verdict
