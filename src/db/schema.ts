@@ -16,6 +16,17 @@ export const jobs = pgTable('jobs', {
   updatedAt: timestamp('updated_at').defaultNow(),
 })
 
+/** How a submitted form answer was resolved — mirrors the resolution order both
+ * apply agents' instructions spell out (structured profile field, previously-
+ * learned answer, LLM inference, or a fresh human answer). */
+export type AnswerSource = 'profile' | 'learned' | 'inferred' | 'human'
+
+export interface RecordedAnswer {
+  question: string
+  answer: string
+  source: AnswerSource
+}
+
 export const applications = pgTable('applications', {
   id: text('id').primaryKey(),
   jobId: text('job_id').notNull().references(() => jobs.id),
@@ -23,6 +34,23 @@ export const applications = pgTable('applications', {
   result: text('result'),
   screenshotPath: text('screenshot_path'),
   error: text('error'),
+  /** Every question/answer pair the apply agent recorded while filling this
+   * application, regardless of resolution path — the audit trail the daily
+   * review dashboard reads. */
+  answers: jsonb('answers').$type<RecordedAnswer[]>().notNull().default([]),
+  createdAt: timestamp('created_at').defaultNow(),
+})
+
+/** Daily-review feedback log. Not the live lookup source for applying —
+ * profile.json.answers stays that (read via lookup-learned-answer) — this is
+ * a history of what the human marked correct/wrong and why, so a correction
+ * isn't just a silent overwrite. */
+export const answerReviews = pgTable('answer_reviews', {
+  id: text('id').primaryKey(),
+  question: text('question').notNull(),
+  answer: text('answer').notNull(),
+  verdict: text('verdict', { enum: ['correct', 'wrong'] }).notNull(),
+  note: text('note'),
   createdAt: timestamp('created_at').defaultNow(),
 })
 
