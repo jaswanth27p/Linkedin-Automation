@@ -8,6 +8,10 @@ export const appConfigSchema = z.object({
   profileFiles: z.object({
     resume: z.string(),
     profile: z.string(),
+    /** Absolute path to the résumé file (PDF/DOCX) to upload on apply forms.
+     * Optional — if unset, upload-resume falls back to asking the human to
+     * attach it manually. */
+    resumeFile: z.string().optional(),
   }),
   search: z.object({
     irrelevantBailRatio: z.number().min(0).max(1).default(0.5),

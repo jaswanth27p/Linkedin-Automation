@@ -13,6 +13,9 @@ export default {
   profileFiles: {
     resume: "./resume.md",
     profile: "./profile.json",
+    // Absolute path to your résumé file for upload-resume to attach on apply
+    // forms, e.g. "C:/Users/you/Documents/resume.pdf". Optional.
+    // resumeFile: "",
   },
   model: "opencode-go/deepseek-v4-pro",
   search: {
