@@ -11,6 +11,7 @@ import { stopSearchAndWait } from './agents/search-agent.ts'
 import { stopEasyApplyWorker } from './queues/easy-apply-worker.ts'
 import { stopExternalApplyWorker } from './queues/external-apply-worker.ts'
 import { closeApplyQueues } from './queues/apply-queues.ts'
+import { startDashboard, stopDashboard } from './dashboard/server.ts'
 import { mountTui, destroyTui } from './tui/index.tsx'
 
 let shuttingDown = false
@@ -20,6 +21,7 @@ async function cleanup() {
   shuttingDown = true
   logger.info('Shutting down...')
   destroyTui()
+  stopDashboard()
   stopLoginAutoVerify()
   // Stop all three agents/processes in dependency order: the search agent
   // first (it's driving the browser directly, no queue to gate it), then
@@ -45,6 +47,7 @@ async function main() {
   await loadProfile(config.profileFiles.profile)
 
   getDb()
+  startDashboard()
 
   initAppState({
     concurrency: config.concurrency,
