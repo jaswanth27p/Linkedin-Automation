@@ -5,11 +5,12 @@ import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { Agent } from '@mastra/core/agent'
 import { createTool } from '@mastra/core/tools'
-import { AgentBrowser } from '@mastra/agent-browser'
+import type { AgentBrowser } from '@mastra/agent-browser'
 import { getSharedCdpUrl } from '../browser/session.ts'
+import { ApplyBrowser } from './browser/apply-browser.ts'
 import { getCurrentConfig } from '../config/current.ts'
 import { getDb } from '../db/index.ts'
-import { jobs, applications } from '../db/schema.ts'
+import { jobs, applications, type RecordedAnswer, type AnswerSource } from '../db/schema.ts'
 import { loadResume, loadProfile, saveLearnedAnswer } from '../profile/loader.ts'
 import { findLearnedAnswer } from '../profile/answer-matching.ts'
 import { appState, pushLog, setAgentStatus } from '../state/app-state.ts'
@@ -21,11 +22,11 @@ import type { TabId } from '../state/types.ts'
 const EASY_TAB: TabId = 'easy'
 const SCREENSHOT_DIR = './data/screenshots'
 
-let sharedBrowser: AgentBrowser | null = null
+let sharedBrowser: ApplyBrowser | null = null
 
-function getEasyApplyBrowser(): AgentBrowser {
+function getEasyApplyBrowser(): ApplyBrowser {
   if (!sharedBrowser) {
-    sharedBrowser = new AgentBrowser({
+    sharedBrowser = new ApplyBrowser({
       cdpUrl: getSharedCdpUrl(),
       scope: 'shared',
       headless: false,
@@ -35,7 +36,7 @@ function getEasyApplyBrowser(): AgentBrowser {
   return sharedBrowser
 }
 
-interface JobRecord {
+export interface JobRecord {
   id: string
   title: string
   company: string
@@ -75,11 +76,49 @@ function createAskHumanAndRememberTool(config: AppConfig) {
   })
 }
 
-interface SubmissionContext {
+export interface SubmissionContext {
   reported: boolean
+  answers: RecordedAnswer[]
 }
 
-function createReportSubmissionTool(job: JobRecord, browser: AgentBrowser, ctx: SubmissionContext) {
+/** Exported so the answer-tracking flow can be tested directly against a fake
+ * ctx/browser without a live LLM or browser session. */
+export function createRecordAnswerTool(ctx: SubmissionContext) {
+  return createTool({
+    id: 'record-answer',
+    description:
+      "Record the question and answer you just used for a form field, and how you resolved it. Call this for EVERY field you fill, regardless of which resolution path you used (structured profile field, lookup-learned-answer, your own inference, or ask-human-and-remember) — this is the only record of what was actually submitted, for later human review.",
+    inputSchema: z.object({
+      question: z.string(),
+      answer: z.string(),
+      source: z.enum(['profile', 'learned', 'inferred', 'human']),
+    }),
+    outputSchema: z.object({ ok: z.boolean() }),
+    execute: async ({ question, answer, source }) => {
+      ctx.answers.push({ question, answer, source: source as AnswerSource })
+      return { ok: true }
+    },
+  })
+}
+
+function createUploadResumeTool(config: AppConfig, browser: ApplyBrowser) {
+  return createTool({
+    id: 'upload-resume',
+    description:
+      "Upload the candidate's resume file to a file-input field on the current page (e.g. an Easy Apply 'Attach resume' step). Only call this when the form actually shows a file upload control. If it returns ok: false, there was no plain file input to use (e.g. a Google-Drive-only widget) — fall back to asking the human to attach it manually via ask-human-and-remember, then continue once they confirm.",
+    inputSchema: z.object({}),
+    outputSchema: z.object({ ok: z.boolean(), error: z.string().optional() }),
+    execute: async () => {
+      const resumeFile = config.profileFiles.resumeFile
+      if (!resumeFile) return { ok: false, error: 'no resumeFile configured in linkedin-auto.config.ts' }
+      return browser.uploadFile(resumeFile, 'resume')
+    },
+  })
+}
+
+/** Exported so the answer-tracking flow can be tested directly against a fake
+ * ctx/browser without a live LLM or browser session. */
+export function createReportSubmissionTool(job: JobRecord, browser: AgentBrowser, ctx: SubmissionContext) {
   return createTool({
     id: 'report-submission',
     description:
@@ -112,6 +151,7 @@ function createReportSubmissionTool(job: JobRecord, browser: AgentBrowser, ctx: 
           status: 'applied',
           result: 'Applied successfully',
           screenshotPath,
+          answers: ctx.answers,
         })
         await db.update(jobs).set({ status: 'applied', updatedAt: new Date() }).where(eq(jobs.id, job.id))
         pushLog(EASY_TAB, `Applied: ${job.title} @ ${job.company}`)
@@ -121,6 +161,7 @@ function createReportSubmissionTool(job: JobRecord, browser: AgentBrowser, ctx: 
           jobId: job.id,
           status: 'failed',
           error: input.error ?? 'Unknown failure',
+          answers: ctx.answers,
         })
         await db.update(jobs).set({ status: 'failed', updatedAt: new Date() }).where(eq(jobs.id, job.id))
         pushLog(EASY_TAB, `Failed: ${job.title} @ ${job.company} — ${input.error ?? 'unknown failure'}`)
@@ -154,8 +195,10 @@ Steps:
    b. Otherwise, call lookup-learned-answer with the exact on-page question text. If found is true, use that answer.
    c. Otherwise, if you can confidently infer the answer from the resume/profile content, answer it yourself.
    d. Otherwise — a genuine unknown — call ask-human-and-remember with the question, then use the returned answer.
-3. Submit the application once all steps are complete.
-4. Call report-submission with success: true after a successful submission, or success: false with a short error if you get stuck in a way you cannot resolve (broken page, unexpected error, application form crashed). Call it exactly once, at the very end.
+   e. Regardless of which path (a-d) you used, call record-answer with the question, the answer you used, and which path resolved it (source: "profile", "learned", "inferred", or "human"). This is mandatory for EVERY field — it is the only record of what was actually submitted, for later human review. Do this before moving to the next field.
+3. If the form has a resume/CV upload step, call upload-resume. If it reports ok: false (no file input found — e.g. a Google-Drive-only widget), call ask-human-and-remember asking the human to attach the resume manually in the visible browser, then continue once they confirm.
+4. Submit the application once all steps are complete.
+5. Call report-submission with success: true after a successful submission, or success: false with a short error if you get stuck in a way you cannot resolve (broken page, unexpected error, application form crashed). Call it exactly once, at the very end.
 `.trim()
 }
 
@@ -177,7 +220,7 @@ export async function processEasyApplyJob(jobId: string): Promise<void> {
   const config = getCurrentConfig()
 
   const jobRecord: JobRecord = { id: job.id, title: job.title, company: job.company, applyUrl: job.applyUrl }
-  const ctx: SubmissionContext = { reported: false }
+  const ctx: SubmissionContext = { reported: false, answers: [] }
   const browser = getEasyApplyBrowser()
 
   try {
@@ -192,6 +235,8 @@ export async function processEasyApplyJob(jobId: string): Promise<void> {
       tools: {
         lookupLearnedAnswer: createLookupLearnedAnswerTool(config),
         askHumanAndRemember: createAskHumanAndRememberTool(config),
+        recordAnswer: createRecordAnswerTool(ctx),
+        uploadResume: createUploadResumeTool(config, browser),
         reportSubmission: createReportSubmissionTool(jobRecord, browser, ctx),
       },
     })
@@ -210,7 +255,7 @@ export async function processEasyApplyJob(jobId: string): Promise<void> {
   } catch (err) {
     if (!ctx.reported) {
       const message = err instanceof Error ? err.message : String(err)
-      await db.insert(applications).values({ id: randomUUID(), jobId: job.id, status: 'failed', error: message })
+      await db.insert(applications).values({ id: randomUUID(), jobId: job.id, status: 'failed', error: message, answers: ctx.answers })
       await db.update(jobs).set({ status: 'failed', updatedAt: new Date() }).where(eq(jobs.id, job.id))
       pushLog(EASY_TAB, `Failed: ${job.title} @ ${job.company} — ${message}`)
     }
@@ -219,7 +264,7 @@ export async function processEasyApplyJob(jobId: string): Promise<void> {
 
   if (!ctx.reported) {
     const message = 'Agent finished without reporting a result'
-    await db.insert(applications).values({ id: randomUUID(), jobId: job.id, status: 'failed', error: message })
+    await db.insert(applications).values({ id: randomUUID(), jobId: job.id, status: 'failed', error: message, answers: ctx.answers })
     await db.update(jobs).set({ status: 'failed', updatedAt: new Date() }).where(eq(jobs.id, job.id))
     pushLog(EASY_TAB, `Failed: ${job.title} @ ${job.company} — ${message}`)
   }
