@@ -5,11 +5,12 @@ import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { Agent } from '@mastra/core/agent'
 import { createTool } from '@mastra/core/tools'
-import { AgentBrowser } from '@mastra/agent-browser'
+import type { AgentBrowser } from '@mastra/agent-browser'
 import { getSharedCdpUrl } from '../browser/session.ts'
+import { ApplyBrowser } from './browser/apply-browser.ts'
 import { getCurrentConfig } from '../config/current.ts'
 import { getDb } from '../db/index.ts'
-import { jobs, applications } from '../db/schema.ts'
+import { jobs, applications, type RecordedAnswer, type AnswerSource } from '../db/schema.ts'
 import { loadResume, loadProfile, saveLearnedAnswer } from '../profile/loader.ts'
 import { findLearnedAnswer } from '../profile/answer-matching.ts'
 import { appState, pushLog, setAgentStatus } from '../state/app-state.ts'
@@ -21,11 +22,11 @@ import type { TabId } from '../state/types.ts'
 const EXTERNAL_TAB: TabId = 'external'
 const SCREENSHOT_DIR = './data/screenshots'
 
-let sharedBrowser: AgentBrowser | null = null
+let sharedBrowser: ApplyBrowser | null = null
 
-function getExternalApplyBrowser(): AgentBrowser {
+function getExternalApplyBrowser(): ApplyBrowser {
   if (!sharedBrowser) {
-    sharedBrowser = new AgentBrowser({
+    sharedBrowser = new ApplyBrowser({
       cdpUrl: getSharedCdpUrl(),
       scope: 'shared',
       headless: false,
@@ -35,7 +36,7 @@ function getExternalApplyBrowser(): AgentBrowser {
   return sharedBrowser
 }
 
-interface JobRecord {
+export interface JobRecord {
   id: string
   title: string
   company: string
@@ -92,11 +93,49 @@ function createAskHumanForVerificationTool() {
   })
 }
 
-interface SubmissionContext {
+export interface SubmissionContext {
   reported: boolean
+  answers: RecordedAnswer[]
 }
 
-function createReportSubmissionTool(job: JobRecord, browser: AgentBrowser, ctx: SubmissionContext) {
+/** Exported so the answer-tracking flow can be tested directly against a fake
+ * ctx/browser without a live LLM or browser session. */
+export function createRecordAnswerTool(ctx: SubmissionContext) {
+  return createTool({
+    id: 'record-answer',
+    description:
+      "Record the question and answer you just used for a form field, and how you resolved it. Call this for EVERY field you fill, regardless of which resolution path you used (structured profile field, lookup-learned-answer, your own inference, or ask-human-and-remember) — this is the only record of what was actually submitted, for later human review.",
+    inputSchema: z.object({
+      question: z.string(),
+      answer: z.string(),
+      source: z.enum(['profile', 'learned', 'inferred', 'human']),
+    }),
+    outputSchema: z.object({ ok: z.boolean() }),
+    execute: async ({ question, answer, source }) => {
+      ctx.answers.push({ question, answer, source: source as AnswerSource })
+      return { ok: true }
+    },
+  })
+}
+
+function createUploadResumeTool(config: AppConfig, browser: ApplyBrowser) {
+  return createTool({
+    id: 'upload-resume',
+    description:
+      "Upload the candidate's resume file to a file-input field on the current page (e.g. an ATS 'Attach resume' step). Only call this when the form actually shows a file upload control. If it returns ok: false, there was no plain file input to use (e.g. a Google-Drive-only widget) — fall back to asking the human to attach it manually via ask-human-and-remember, then continue once they confirm.",
+    inputSchema: z.object({}),
+    outputSchema: z.object({ ok: z.boolean(), error: z.string().optional() }),
+    execute: async () => {
+      const resumeFile = config.profileFiles.resumeFile
+      if (!resumeFile) return { ok: false, error: 'no resumeFile configured in linkedin-auto.config.ts' }
+      return browser.uploadFile(resumeFile, 'resume')
+    },
+  })
+}
+
+/** Exported so the answer-tracking flow can be tested directly against a fake
+ * ctx/browser without a live LLM or browser session. */
+export function createReportSubmissionTool(job: JobRecord, browser: AgentBrowser, ctx: SubmissionContext) {
   return createTool({
     id: 'report-submission',
     description:
@@ -129,6 +168,7 @@ function createReportSubmissionTool(job: JobRecord, browser: AgentBrowser, ctx: 
           status: 'applied',
           result: 'Applied successfully',
           screenshotPath,
+          answers: ctx.answers,
         })
         await db.update(jobs).set({ status: 'applied', updatedAt: new Date() }).where(eq(jobs.id, job.id))
         pushLog(EXTERNAL_TAB, `Applied: ${job.title} @ ${job.company}`)
@@ -138,6 +178,7 @@ function createReportSubmissionTool(job: JobRecord, browser: AgentBrowser, ctx: 
           jobId: job.id,
           status: 'failed',
           error: input.error ?? 'Unknown failure',
+          answers: ctx.answers,
         })
         await db.update(jobs).set({ status: 'failed', updatedAt: new Date() }).where(eq(jobs.id, job.id))
         pushLog(EXTERNAL_TAB, `Failed: ${job.title} @ ${job.company} — ${input.error ?? 'unknown failure'}`)
@@ -151,6 +192,11 @@ function createReportSubmissionTool(job: JobRecord, browser: AgentBrowser, ctx: 
 async function buildApplyInstructions(config: AppConfig, job: JobRecord): Promise<string> {
   const resume = await loadResume(config.profileFiles.resume)
   const profile = await loadProfile(config.profileFiles.profile)
+  const siteAccountPassword = process.env.SITE_ACCOUNT_PASSWORD
+
+  const passwordGuidance = siteAccountPassword
+    ? `If the site requires creating an account to apply, use profile.contact.email as the username/email and the following as the password: ${siteAccountPassword}\nThis password is reused across every site's account creation — do not invent a different one.`
+    : `If the site requires creating an account to apply, use profile.contact.email as the username/email and call ask-human-and-remember for a password to use (no SITE_ACCOUNT_PASSWORD is configured).`
 
   return `
 You are completing a job application on an external (non-LinkedIn) careers site, in a real browser that already has a LinkedIn tab open and logged in, and (usually) a Gmail tab open and logged in.
@@ -167,14 +213,16 @@ ${JSON.stringify(profile, null, 2)}
 Steps:
 1. Open a NEW browser tab for the apply URL (browser_tabs action "new") — do not navigate the existing LinkedIn tab, it must stay open and logged in.
 2. Step through the application form (and any account-creation step the site requires). For each field/question, resolve it in this order:
-   a. If it maps directly to a structured profile field above (contact info, work authorization, salary expectation, years of experience, links), use that value directly. For an account-creation email field, use profile.contact.email.
+   a. If it maps directly to a structured profile field above (contact info, work authorization, salary expectation, years of experience, links), use that value directly. For an account-creation email field, use profile.contact.email. ${passwordGuidance}
    b. Otherwise, call lookup-learned-answer with the exact on-page question text. If found is true, use that answer.
    c. Otherwise, if you can confidently infer the answer from the resume/profile content, answer it yourself.
    d. Otherwise — a genuine unknown — call ask-human-and-remember with the question.
-3. If the site sends a one-time code or confirmation link to profile.contact.email: switch to the Gmail tab yourself (browser_tabs), open the newest email from the site (wait a few seconds and refresh if it hasn't arrived yet), and read the code or click the confirmation link directly — do not ask the human for this. Then switch back to the apply tab and continue. Only call ask-human-for-verification if the email still hasn't arrived after a reasonable wait, or its content is ambiguous.
-4. If you hit a CAPTCHA, SMS-only two-factor prompt, or any flow you don't recognize and cannot resolve, call ask-human-for-verification describing what you're stuck on, then continue with their guidance.
-5. Submit the application once all steps are complete.
-6. Call report-submission with success: true after a successful submission, or success: false with a short error if you get stuck in a way you cannot resolve. Call it exactly once, at the very end.
+   e. Regardless of which path (a-d) you used, call record-answer with the question, the answer you used, and which path resolved it (source: "profile", "learned", "inferred", or "human"). This is mandatory for EVERY field — it is the only record of what was actually submitted, for later human review. Do this before moving to the next field.
+3. If the form has a resume/CV upload step, call upload-resume. If it reports ok: false (no file input found — e.g. a Google-Drive-only widget), call ask-human-and-remember asking the human to attach the resume manually in the visible browser, then continue once they confirm.
+4. If the site sends a one-time code or confirmation link to profile.contact.email: switch to the Gmail tab yourself (browser_tabs), open the newest email from the site (wait a few seconds and refresh if it hasn't arrived yet), and read the code or click the confirmation link directly — do not ask the human for this. Then switch back to the apply tab and continue. Only call ask-human-for-verification if the email still hasn't arrived after a reasonable wait, or its content is ambiguous.
+5. If you hit a CAPTCHA, SMS-only two-factor prompt, or any flow you don't recognize and cannot resolve, call ask-human-for-verification describing what you're stuck on, then continue with their guidance.
+6. Submit the application once all steps are complete.
+7. Call report-submission with success: true after a successful submission, or success: false with a short error if you get stuck in a way you cannot resolve. Call it exactly once, at the very end.
 `.trim()
 }
 
@@ -196,7 +244,7 @@ export async function processExternalApplyJob(jobId: string): Promise<void> {
   const config = getCurrentConfig()
 
   const jobRecord: JobRecord = { id: job.id, title: job.title, company: job.company, applyUrl: job.applyUrl }
-  const ctx: SubmissionContext = { reported: false }
+  const ctx: SubmissionContext = { reported: false, answers: [] }
   const browser = getExternalApplyBrowser()
 
   try {
@@ -212,6 +260,8 @@ export async function processExternalApplyJob(jobId: string): Promise<void> {
         lookupLearnedAnswer: createLookupLearnedAnswerTool(config),
         askHumanAndRemember: createAskHumanAndRememberTool(config),
         askHumanForVerification: createAskHumanForVerificationTool(),
+        recordAnswer: createRecordAnswerTool(ctx),
+        uploadResume: createUploadResumeTool(config, browser),
         reportSubmission: createReportSubmissionTool(jobRecord, browser, ctx),
       },
     })
@@ -232,7 +282,7 @@ export async function processExternalApplyJob(jobId: string): Promise<void> {
   } catch (err) {
     if (!ctx.reported) {
       const message = err instanceof Error ? err.message : String(err)
-      await db.insert(applications).values({ id: randomUUID(), jobId: job.id, status: 'failed', error: message })
+      await db.insert(applications).values({ id: randomUUID(), jobId: job.id, status: 'failed', error: message, answers: ctx.answers })
       await db.update(jobs).set({ status: 'failed', updatedAt: new Date() }).where(eq(jobs.id, job.id))
       pushLog(EXTERNAL_TAB, `Failed: ${job.title} @ ${job.company} — ${message}`)
     }
@@ -241,7 +291,7 @@ export async function processExternalApplyJob(jobId: string): Promise<void> {
 
   if (!ctx.reported) {
     const message = 'Agent finished without reporting a result'
-    await db.insert(applications).values({ id: randomUUID(), jobId: job.id, status: 'failed', error: message })
+    await db.insert(applications).values({ id: randomUUID(), jobId: job.id, status: 'failed', error: message, answers: ctx.answers })
     await db.update(jobs).set({ status: 'failed', updatedAt: new Date() }).where(eq(jobs.id, job.id))
     pushLog(EXTERNAL_TAB, `Failed: ${job.title} @ ${job.company} — ${message}`)
   }
