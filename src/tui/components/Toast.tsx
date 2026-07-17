@@ -1,5 +1,5 @@
 import { createSignal, Show } from 'solid-js'
-import { theme } from '../theme.ts'
+import { theme } from '../theme/current.ts'
 
 const [message, setMessage] = createSignal<string | null>(null)
 let timer: ReturnType<typeof setTimeout> | null = null
@@ -24,12 +24,12 @@ export function ToastOverlay() {
         right={2}
         zIndex={3000}
         border
-        borderColor={theme.success}
-        backgroundColor={theme.backgroundPanel}
+        borderColor={theme().accent}
+        backgroundColor={theme().backgroundMenu}
         paddingLeft={1}
         paddingRight={1}
       >
-        <text fg={theme.success}>✓ {message()}</text>
+        <text fg={theme().accent}>✓ {message()}</text>
       </box>
     </Show>
   )

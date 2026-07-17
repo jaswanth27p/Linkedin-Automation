@@ -1,5 +1,5 @@
 import { createSignal, Show, For, onCleanup, createMemo } from 'solid-js'
-import { theme } from '../theme.ts'
+import { theme } from '../theme/current.ts'
 import { listCommandsForTab } from '../../commands/registry.ts'
 import { dispatchCommand } from '../../commands/dispatch.ts'
 import { appState } from '../../state/app-state.ts'
@@ -59,8 +59,8 @@ export function SuggestionBox() {
     <Show when={suggestions().length > 0}>
       <box
         border
-        borderColor={theme.border}
-        backgroundColor={theme.backgroundPanel}
+        borderColor={theme().borderSubtle}
+        backgroundColor={theme().backgroundPanel}
         paddingTop={0}
         paddingBottom={0}
         paddingLeft={1}
@@ -77,13 +77,13 @@ export function SuggestionBox() {
                 dismissSuggestions()
               }}
             >
-              <text fg={row.selected ? theme.accent : theme.textMuted}>
+              <text fg={row.selected ? theme().primary : theme().textMuted}>
                 {row.selected ? '▌' : hasAbove() && row.i === windowStart() ? '↑' : hasBelow() && row.i === windowStart() + VISIBLE_SUGGESTIONS - 1 ? '↓' : ' '}
               </text>
-              <text fg={row.selected ? theme.accent : theme.textMuted}>
+              <text fg={row.selected ? theme().primary : theme().textMuted}>
                 /{row.cmd.name}
               </text>
-              <text fg={theme.textMuted}> — {row.cmd.description}</text>
+              <text fg={theme().textMuted}> — {row.cmd.description}</text>
             </box>
           )}
         </For>
@@ -95,6 +95,7 @@ export function SuggestionBox() {
 export function InputBar(props: { onSubmit: (value: string) => void; disabled?: boolean }) {
   const [value, setValue] = createSignal('')
   const pendingQuestion = createMemo(() => appState.tabs[appState.activeTab].needsInputQuestion)
+  const barColor = () => pendingQuestion() ? theme().warning : props.disabled ? theme().borderActive : theme().accent
 
   const handleInput = (v: string) => {
     setValue(v)
@@ -110,7 +111,9 @@ export function InputBar(props: { onSubmit: (value: string) => void; disabled?: 
   onCleanup(() => dismissSuggestions())
 
   return (
-    <box border borderColor={theme.border} height={3} paddingLeft={1} paddingRight={1}>
+    <box border borderColor={barColor()} backgroundColor={theme().backgroundPanel} height={3} paddingLeft={1} paddingRight={1}>
+      <text fg={barColor()}>{pendingQuestion() ? 'Q' : props.disabled ? '…' : '/'}</text>
+      <text fg={theme().textMuted}> </text>
       <input
         value={value()}
         placeholder={

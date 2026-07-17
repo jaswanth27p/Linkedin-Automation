@@ -5,6 +5,10 @@ import type { TabId, Settings } from '../state/types.ts'
 import { getBrowserServerPort } from '../browser/session.ts'
 import { verifyLogin } from '../browser/verify-login.ts'
 import { openTabPicker } from '../tui/components/TabPicker.tsx'
+import { openThemePicker } from '../tui/components/ThemePicker.tsx'
+import { setTheme } from '../tui/theme/current.ts'
+import { hasTheme } from '../tui/theme/index.ts'
+import { persistThemeName } from '../tui/theme/persist.ts'
 
 export function registerGlobalCommands(): void {
   registerCommand({
@@ -33,6 +37,26 @@ export function registerGlobalCommands(): void {
         return
       }
       setActiveTab(target)
+    },
+  })
+
+  registerCommand({
+    name: 'theme',
+    scope: 'global',
+    description: '/theme [name] — switch color theme (no arg opens a picker)',
+    run: (ctx) => {
+      const target = ctx.args[0]
+      if (!target) {
+        openThemePicker()
+        return
+      }
+      if (!hasTheme(target)) {
+        pushLog(appState.activeTab, `Unknown theme: ${target}. Run /theme with no args to browse.`)
+        return
+      }
+      setTheme(target)
+      persistThemeName(target)
+      pushLog(appState.activeTab, `Theme changed to: ${target}`)
     },
   })
 

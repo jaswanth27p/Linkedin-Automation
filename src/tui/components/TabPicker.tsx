@@ -1,7 +1,7 @@
 import { createSignal, For, Show } from 'solid-js'
 import { TextAttributes } from '@opentui/core'
 import { appState, setActiveTab, TAB_IDS } from '../../state/app-state.ts'
-import { theme } from '../theme.ts'
+import { theme } from '../theme/current.ts'
 import type { TabId } from '../../state/types.ts'
 
 const TAB_LABELS: Record<TabId, string> = {
@@ -54,31 +54,34 @@ export function TabPickerOverlay() {
       >
         <box
           border
-          borderColor={theme.accent}
-          backgroundColor={theme.backgroundPanel}
+          borderColor={theme().accent}
+          backgroundColor={theme().backgroundPanel}
           flexDirection="column"
           paddingTop={1}
           paddingBottom={1}
           paddingLeft={2}
           paddingRight={2}
         >
-          <text fg={theme.text} attributes={TextAttributes.BOLD}>Switch tab</text>
-          <text fg={theme.textMuted}> </text>
+          <text fg={theme().accent} attributes={TextAttributes.BOLD}>Switch tab</text>
+          <text fg={theme().textMuted}> </text>
           <For each={TAB_IDS}>
             {(tab, i) => {
               const selected = () => i() === tabPickerIndex()
               return (
                 <box
                   flexDirection="row"
+                  border
+                  borderColor={selected() ? theme().accent : theme().borderSubtle}
+                  backgroundColor={selected() ? theme().backgroundMenu : theme().backgroundElement}
                   onMouseDown={() => {
                     setActiveTab(tab)
                     setTabPickerOpen(false)
                   }}
                 >
-                  <text fg={selected() ? theme.accent : theme.textMuted}>{selected() ? '▌ ' : '  '}</text>
+                  <text fg={selected() ? theme().primary : theme().textMuted}>{selected() ? '▌ ' : '  '}</text>
                   <text
-                    fg={selected() ? theme.accent : theme.text}
-                    bg={selected() ? theme.background : undefined}
+                    fg={selected() ? theme().primary : theme().text}
+                    bg={selected() ? theme().background : undefined}
                   >
                     {TAB_LABELS[tab]}
                   </text>
@@ -86,8 +89,8 @@ export function TabPickerOverlay() {
               )
             }}
           </For>
-          <text fg={theme.textMuted}> </text>
-          <text fg={theme.textMuted}>↑/↓ move · Enter select · Esc cancel</text>
+          <text fg={theme().textMuted}> </text>
+          <text fg={theme().textMuted}>↑/↓ move · Enter select · Esc cancel</text>
         </box>
       </box>
     </Show>

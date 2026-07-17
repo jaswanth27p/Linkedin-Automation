@@ -8,12 +8,11 @@ beforeEach(() => {
 })
 
 describe('App', () => {
-  test('renders header, sidebar, and the active tab\'s log panel', async () => {
+  test('renders sidebar and the active tab\'s log panel', async () => {
     pushLog('search', 'scan started')
     const setup = await testRender(() => <App />, { width: 100, height: 30 })
     await setup.renderOnce()
     const frame = setup.captureCharFrame()
-    expect(frame).toContain('LinkedIn Auto-Apply')
     expect(frame).toContain('Agents')
     expect(frame).toContain('scan started')
   })

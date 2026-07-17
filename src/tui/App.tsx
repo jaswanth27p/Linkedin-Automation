@@ -2,13 +2,13 @@ import { createMemo, createEffect } from 'solid-js'
 import { useKeyboard, useTerminalDimensions, useRenderer, useSelectionHandler } from '@opentui/solid'
 import { appState, setActiveTab, TAB_IDS } from '../state/app-state.ts'
 import { dispatchCommand } from '../commands/dispatch.ts'
-import { Header } from './components/Header.tsx'
 import { Sidebar } from './components/Sidebar.tsx'
 import { LogPanel } from './components/LogPanel.tsx'
 import { InputBar, SuggestionBox, suggestions, selectedSuggestionIndex, setSelectedSuggestionIndex, dismissSuggestions } from './components/InputBar.tsx'
 import { ToastOverlay, showToast } from './components/Toast.tsx'
 import { TabPickerOverlay, tabPickerOpen, closeTabPicker, moveTabPicker, confirmTabPicker } from './components/TabPicker.tsx'
-import { theme } from './theme.ts'
+import { ThemePickerOverlay, themePickerOpen, closeThemePicker, moveThemePicker, confirmThemePicker } from './components/ThemePicker.tsx'
+import { theme } from './theme/current.ts'
 
 const NARROW_WIDTH_THRESHOLD = 70
 
@@ -55,6 +55,24 @@ export function App() {
 
     if (key.ctrl && key.name === 'q') {
       dispatchCommand('/exit')
+      return
+    }
+
+    // Theme picker modal takes priority — only one popup at a time.
+    if (themePickerOpen()) {
+      if (key.name === 'up') {
+        key.preventDefault()
+        moveThemePicker(-1)
+      } else if (key.name === 'down') {
+        key.preventDefault()
+        moveThemePicker(1)
+      } else if (key.name === 'return' || key.name === 'enter' || key.name === 'kpenter') {
+        key.preventDefault()
+        confirmThemePicker()
+      } else if (key.name === 'escape') {
+        key.preventDefault()
+        closeThemePicker()
+      }
       return
     }
 
@@ -139,12 +157,9 @@ export function App() {
       flexDirection="column"
       width={dimensions().width}
       height={dimensions().height}
-      backgroundColor={theme.background}
+      backgroundColor={theme().background}
       position="relative"
     >
-      <box flexShrink={0}>
-        <Header />
-      </box>
       <box flexDirection="row" flexGrow={1} minHeight={0}>
         <box width={isNarrow() ? 12 : 30} minHeight={0}>
           <Sidebar />
@@ -161,6 +176,7 @@ export function App() {
       </box>
       <ToastOverlay />
       <TabPickerOverlay />
+      <ThemePickerOverlay />
     </box>
   )
 }
