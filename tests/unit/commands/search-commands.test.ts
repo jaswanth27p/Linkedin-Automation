@@ -23,11 +23,13 @@ beforeEach(() => {
 })
 
 describe('search commands', () => {
-  test('registers all four search-tab commands', () => {
+  test('registers all six search-tab commands', () => {
     expect(getCommand('search-urls')?.scope).toBe('search')
     expect(getCommand('search-describe')?.scope).toBe('search')
     expect(getCommand('search-resume')?.scope).toBe('search')
     expect(getCommand('stop-search')?.scope).toBe('search')
+    expect(getCommand('auto-on')?.scope).toBe('search')
+    expect(getCommand('auto-off')?.scope).toBe('search')
   })
 
   test('/stop-search is a no-op with a message when nothing is running', async () => {
@@ -40,6 +42,33 @@ describe('search commands', () => {
     await getCommand('search-describe')!.run({ args: [], rawArgs: '' })
     expect(appState.tabs.search.logs).toContain(
       'No description given and no requirements set in linkedin-auto.config.ts.',
+    )
+  })
+
+  test('/auto-off is a no-op with a message when auto mode is not on', async () => {
+    await getCommand('auto-off')!.run({ args: [], rawArgs: '' })
+    expect(appState.tabs.search.logs).toContain('Auto mode is not on.')
+  })
+
+  test('/auto-on with no mode arg logs usage and does not start anything', async () => {
+    await getCommand('auto-on')!.run({ args: [], rawArgs: '' })
+    expect(appState.tabs.search.logs).toContain('Usage: /auto-on loop | /auto-on interval <duration>')
+  })
+
+  test('/auto-on with an unrecognized mode logs usage', async () => {
+    await getCommand('auto-on')!.run({ args: ['bogus'], rawArgs: 'bogus' })
+    expect(appState.tabs.search.logs).toContain('Usage: /auto-on loop | /auto-on interval <duration>')
+  })
+
+  test('/auto-on interval with no duration logs usage', async () => {
+    await getCommand('auto-on')!.run({ args: ['interval'], rawArgs: 'interval' })
+    expect(appState.tabs.search.logs).toContain('Usage: /auto-on interval <duration> (e.g. 1h, 3h, 90m)')
+  })
+
+  test('/auto-on interval with an invalid duration logs a rejection', async () => {
+    await getCommand('auto-on')!.run({ args: ['interval', 'not-a-duration'], rawArgs: 'interval not-a-duration' })
+    expect(appState.tabs.search.logs).toContain(
+      'Invalid duration: not-a-duration. Use formats like 1h, 3h, 90m, 3h30m.',
     )
   })
 })

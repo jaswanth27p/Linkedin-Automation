@@ -8,6 +8,7 @@ import {
   stopSearch,
   isSearchRunning,
 } from '../agents/search-agent.ts'
+import { startAutoMode, stopAutoMode, parseDurationMs } from '../agents/search-scheduler.ts'
 
 const SEARCH_TAB = 'search'
 
@@ -90,5 +91,41 @@ export function registerSearchCommands(): void {
       stopSearch()
       pushLog(SEARCH_TAB, 'Stopping search...')
     },
+  })
+
+  registerCommand({
+    name: 'auto-on',
+    scope: 'search',
+    description:
+      '/auto-on loop | /auto-on interval <duration> (e.g. 1h, 3h, 90m) — schedule urls→describe→resume automatically, and start both apply-queue workers',
+    run: (ctx) => {
+      const mode = ctx.args[0]
+      if (mode === 'loop') {
+        startAutoMode('loop')
+        return
+      }
+      if (mode === 'interval') {
+        const durationRaw = ctx.args[1]
+        if (!durationRaw) {
+          pushLog(SEARCH_TAB, 'Usage: /auto-on interval <duration> (e.g. 1h, 3h, 90m)')
+          return
+        }
+        const ms = parseDurationMs(durationRaw)
+        if (ms === null) {
+          pushLog(SEARCH_TAB, `Invalid duration: ${durationRaw}. Use formats like 1h, 3h, 90m, 3h30m.`)
+          return
+        }
+        startAutoMode('interval', ms)
+        return
+      }
+      pushLog(SEARCH_TAB, 'Usage: /auto-on loop | /auto-on interval <duration>')
+    },
+  })
+
+  registerCommand({
+    name: 'auto-off',
+    scope: 'search',
+    description: 'Stop the auto-mode search rotation (apply-queue workers keep running)',
+    run: () => stopAutoMode(),
   })
 }

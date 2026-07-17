@@ -14,6 +14,14 @@ export function showToast(text: string, durationMs = 1800): void {
   }, durationMs)
 }
 
+function dismissToast(): void {
+  if (timer) {
+    clearTimeout(timer)
+    timer = null
+  }
+  setMessage(null)
+}
+
 /** Absolute-positioned overlay pinned to the top-right; render once at the app root. */
 export function ToastOverlay() {
   return (
@@ -28,6 +36,7 @@ export function ToastOverlay() {
         backgroundColor={theme().backgroundMenu}
         paddingLeft={1}
         paddingRight={1}
+        onMouseDown={dismissToast}
       >
         <text fg={theme().accent}>✓ {message()}</text>
       </box>

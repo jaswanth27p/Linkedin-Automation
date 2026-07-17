@@ -1,6 +1,6 @@
 import { For, Show } from 'solid-js'
 import { TextAttributes } from '@opentui/core'
-import { appState, TAB_IDS } from '../../state/app-state.ts'
+import { appState, setActiveTab, TAB_IDS } from '../../state/app-state.ts'
 import { theme } from '../theme/current.ts'
 import type { TabId } from '../../state/types.ts'
 
@@ -62,6 +62,7 @@ export function Sidebar() {
               backgroundColor={appState.activeTab === tab ? theme().backgroundMenu : theme().backgroundElement}
               paddingLeft={1}
               paddingRight={1}
+              onMouseDown={() => setActiveTab(tab)}
             >
               <text fg={tabAccent(tab)}>{appState.activeTab === tab ? '▌' : ' '}</text>
               <text fg={appState.activeTab === tab ? tabAccent(tab) : theme().text} attributes={TextAttributes.BOLD}>
