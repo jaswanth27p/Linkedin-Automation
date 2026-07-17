@@ -8,6 +8,7 @@ import { startLoginAutoVerify, stopLoginAutoVerify } from './browser/verify-logi
 import { initAppState } from './state/app-state.ts'
 import { registerBuiltinCommands } from './commands/index.ts'
 import { stopSearchAndWait } from './agents/search-agent.ts'
+import { stopCareerCheckAndWait } from './agents/career-scan-agent.ts'
 import { stopEasyApplyWorker } from './queues/easy-apply-worker.ts'
 import { stopExternalApplyWorker } from './queues/external-apply-worker.ts'
 import { closeApplyQueues } from './queues/apply-queues.ts'
@@ -29,6 +30,7 @@ async function cleanup() {
   // alive indefinitely otherwise), and only once nothing is using the
   // browser anymore do we kill it.
   await stopSearchAndWait()
+  await stopCareerCheckAndWait()
   await stopEasyApplyWorker()
   await stopExternalApplyWorker()
   await closeApplyQueues()

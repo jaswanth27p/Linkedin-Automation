@@ -8,13 +8,15 @@ const TAB_LABELS: Record<TabId, string> = {
   search: 'Search',
   easy: 'Easy Apply',
   external: 'External Apply',
+  careers: 'Career Pages',
 }
 
 export function Sidebar() {
   const tabAccent = (tab: TabId) => {
     if (tab === 'search') return theme().accent
     if (tab === 'easy') return theme().success
-    return theme().secondary
+    if (tab === 'external') return theme().secondary
+    return theme().warning
   }
 
   const statusColor = (tab: TabId) => {

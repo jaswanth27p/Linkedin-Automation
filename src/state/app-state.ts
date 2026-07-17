@@ -13,6 +13,7 @@ function initialState(settings: Settings): AppState {
       search: emptyTabState(),
       easy: emptyTabState(),
       external: emptyTabState(),
+      careers: emptyTabState(),
     },
     settings,
   }

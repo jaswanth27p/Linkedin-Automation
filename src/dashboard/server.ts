@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { eq, desc, gte } from 'drizzle-orm'
+import { eq, desc, gte, sql } from 'drizzle-orm'
 import { getDb } from '../db/index.ts'
-import { jobs, applications, searchRuns, answerReviews } from '../db/schema.ts'
+import { jobs, applications, searchRuns, answerReviews, careerPages, careerPageScans } from '../db/schema.ts'
 import { getApplyQueueCounts } from '../queues/apply-queues.ts'
 import { getCurrentConfig } from '../config/current.ts'
 import { saveLearnedAnswer } from '../profile/loader.ts'
@@ -28,7 +28,7 @@ function page(body: string): Response {
   nav a { margin-right: 1rem; }
   fieldset { margin-bottom: 1rem; }
 </style>
-</head><body><nav><a href="/">Summary</a><a href="/applications">Applications</a><a href="/review">Review</a></nav>${body}</body></html>`,
+</head><body><nav><a href="/">Summary</a><a href="/applications">Applications</a><a href="/review">Review</a><a href="/career-pages">Career Pages</a></nav>${body}</body></html>`,
     { headers: { 'Content-Type': 'text/html; charset=utf-8' } },
   )
 }
@@ -60,6 +60,11 @@ async function renderSummary(): Promise<Response> {
   `)
 }
 
+const SOURCE_LABELS: Record<string, string> = {
+  linkedin: 'LinkedIn',
+  career_page: 'Career Page',
+}
+
 async function renderApplications(): Promise<Response> {
   const db = getDb()
   const rows = await db
@@ -69,6 +74,7 @@ async function renderApplications(): Promise<Response> {
       createdAt: applications.createdAt,
       jobTitle: jobs.title,
       company: jobs.company,
+      source: jobs.source,
     })
     .from(applications)
     .innerJoin(jobs, eq(applications.jobId, jobs.id))
@@ -81,6 +87,7 @@ async function renderApplications(): Promise<Response> {
     <tr>
       <td>${escapeHtml(r.jobTitle)}</td>
       <td>${escapeHtml(r.company)}</td>
+      <td>${SOURCE_LABELS[r.source] ?? r.source}</td>
       <td>${r.status}</td>
       <td>${r.answers.length} answer(s)</td>
       <td>${r.createdAt?.toISOString() ?? ''}</td>
@@ -89,7 +96,41 @@ async function renderApplications(): Promise<Response> {
     .join('')
 
   return page(
-    `<h1>Applications</h1><table><tr><th>Job</th><th>Company</th><th>Status</th><th>Answers</th><th>When</th></tr>${items}</table>`,
+    `<h1>Applications</h1><table><tr><th>Job</th><th>Company</th><th>Source</th><th>Status</th><th>Answers</th><th>When</th></tr>${items}</table>`,
+  )
+}
+
+async function renderCareerPages(): Promise<Response> {
+  const db = getDb()
+  const rows = await db
+    .select({
+      url: careerPages.url,
+      label: careerPages.label,
+      addedAt: careerPages.addedAt,
+      lastCheckedAt: careerPages.lastCheckedAt,
+      relevantFound: sql<number>`coalesce(sum(${careerPageScans.relevantCount}), 0)`,
+    })
+    .from(careerPages)
+    .leftJoin(careerPageScans, eq(careerPageScans.careerPageId, careerPages.id))
+    .groupBy(careerPages.id)
+    .orderBy(careerPages.addedAt)
+
+  const items = rows
+    .map(
+      (r) => `
+    <tr>
+      <td>${escapeHtml(r.label)}</td>
+      <td><a href="${escapeHtml(r.url)}">${escapeHtml(r.url)}</a></td>
+      <td>${r.lastCheckedAt?.toISOString() ?? 'never'}</td>
+      <td>${r.relevantFound}</td>
+    </tr>`,
+    )
+    .join('')
+
+  return page(
+    `<h1>Career Pages</h1><table><tr><th>Label</th><th>URL</th><th>Last checked</th><th>Relevant found (all time)</th></tr>${items}</table>${
+      rows.length === 0 ? '<p>No career pages tracked yet — use /add-career-url.</p>' : ''
+    }`,
   )
 }
 
@@ -157,6 +198,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (req.method === 'GET' && url.pathname === '/') return renderSummary()
   if (req.method === 'GET' && url.pathname === '/applications') return renderApplications()
   if (req.method === 'GET' && url.pathname === '/review') return renderReview()
+  if (req.method === 'GET' && url.pathname === '/career-pages') return renderCareerPages()
   if (req.method === 'POST' && url.pathname === '/review/feedback') return handleFeedback(req)
   return new Response('not found', { status: 404 })
 }

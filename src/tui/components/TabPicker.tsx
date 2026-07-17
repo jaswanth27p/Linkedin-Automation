@@ -8,6 +8,7 @@ const TAB_LABELS: Record<TabId, string> = {
   search: 'Search',
   easy: 'Easy Apply',
   external: 'External Apply',
+  careers: 'Career Pages',
 }
 
 export const [tabPickerOpen, setTabPickerOpen] = createSignal(false)
