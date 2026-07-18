@@ -330,9 +330,11 @@ export async function runCareerCheck(): Promise<void> {
       }
 
       pushLog(CAREERS_TAB, abort.signal.aborted ? 'Career-page check stopped early.' : 'Career-page check finished.')
-      setAgentStatus(CAREERS_TAB, 'idle', null)
     } finally {
       activeAbort = null
+      // Always drop back to idle, even when a DB write outside the per-page
+      // try/catch threw — otherwise the sidebar stays stuck on "running".
+      setAgentStatus(CAREERS_TAB, 'idle', null)
     }
   })()
 

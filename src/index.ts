@@ -12,7 +12,7 @@ import { stopAutoModeAndWait } from './agents/search-scheduler.ts'
 import { stopCareerCheckAndWait } from './agents/career-scan-agent.ts'
 import { stopEasyApplyWorker } from './queues/easy-apply-worker.ts'
 import { stopExternalApplyWorker } from './queues/external-apply-worker.ts'
-import { closeApplyQueues } from './queues/apply-queues.ts'
+import { closeApplyQueues, getApplyQueueCounts } from './queues/apply-queues.ts'
 import { startDashboard, stopDashboard } from './dashboard/server.ts'
 import { mountTui, destroyTui } from './tui/index.tsx'
 
@@ -50,7 +50,39 @@ async function main() {
   await loadResume(config.profileFiles.resume)
   await loadProfile(config.profileFiles.profile)
 
-  getDb()
+  // Fail fast, before the TUI takes over the terminal, if Postgres is
+  // unreachable — a plain SELECT 1, since schema setup is still the user's
+  // own `bun run db:push` step (see README), not done here.
+  try {
+    await getDb().execute('select 1')
+  } catch (err) {
+    logger.error({ err }, 'database not ready')
+    console.error(
+      `Could not connect to Postgres (DATABASE_URL=${process.env.DATABASE_URL ?? '(unset)'}).\n` +
+        'Is the database running? Start it with: docker compose up -d\n' +
+        'Has the schema been pushed? Run: bun run db:push\n' +
+        `Underlying error: ${err instanceof Error ? err.message : String(err)}`,
+    )
+    process.exit(1)
+  }
+
+  // Same fail-fast for Redis — ioredis retries forever by default, so a down
+  // Redis otherwise shows up as a silent hang the first time a job is queued.
+  try {
+    await Promise.race([
+      getApplyQueueCounts('easy'),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timed out after 5s')), 5000)),
+    ])
+  } catch (err) {
+    logger.error({ err }, 'redis not ready')
+    console.error(
+      `Could not reach Redis (REDIS_URL=${process.env.REDIS_URL ?? '(unset)'}).\n` +
+        'Is Redis running? Start it with: docker compose up -d\n' +
+        `Underlying error: ${err instanceof Error ? err.message : String(err)}`,
+    )
+    process.exit(1)
+  }
+
   startDashboard()
 
   initAppState({

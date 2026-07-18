@@ -1,19 +1,39 @@
+import { randomUUID } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 import { logger } from '../utils/logger.ts'
 
 let serverPort: number | null = null
 let serverProc: ReturnType<typeof Bun.spawn> | null = null
 let sharedCdpUrl: string | null = null
 
+/** Shared secret between this process and the browser-server subprocess. Every
+ * request must carry it (?token=...) so a random local process or a malicious
+ * web page port-scanning localhost can't drive the browser or kill it. */
+const serverToken = randomUUID()
+
+/** How long to wait for the subprocess to print READY:<port> before giving up.
+ * Covers Chrome cold starts; a missing/broken `node` or Chrome install fails
+ * much faster via process exit. */
+const READY_TIMEOUT_MS = 60_000
+
+// Resolve the server script relative to THIS file, not the cwd — when installed
+// as an npm package the process cwd is the user's workspace, not the package.
+const BROWSER_SERVER_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'browser-server.mjs')
+
 async function ensureBrowserServer(storageStatePath: string): Promise<number> {
   if (serverPort !== null) return serverPort
 
-  const proc = Bun.spawn(['node', 'scripts/browser-server.mjs'], {
+  // The browser subprocess deliberately runs under Node, not Bun — Bun's copy
+  // of playwright-core needs the ws patch for CDP, and Node is unaffected.
+  const proc = Bun.spawn(['node', BROWSER_SERVER_SCRIPT], {
     stdout: 'pipe',
     stderr: 'pipe',
     env: {
       ...process.env,
       STORAGE_STATE_PATH: storageStatePath,
       LAUNCH_HEADLESS: '0',
+      BROWSER_SERVER_TOKEN: serverToken,
     },
   })
 
@@ -28,29 +48,56 @@ async function ensureBrowserServer(storageStatePath: string): Promise<number> {
     }
   })()
 
-  const decoder = new TextDecoder()
-  const reader = proc.stdout.getReader()
+  const port = await new Promise<number>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Browser server did not report READY within ${READY_TIMEOUT_MS / 1000}s`))
+    }, READY_TIMEOUT_MS)
 
-  let line = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    line += decoder.decode(value, { stream: true })
-    const match = line.match(/READY:(\d+)/)
-    if (match) {
-      serverPort = parseInt(match[1], 10)
-      break
-    }
-  }
+    // If the subprocess dies before READY (node missing, Chrome not installed,
+    // playwright error), surface that as the startup error instead of hanging.
+    proc.exited.then((code) => {
+      clearTimeout(timer)
+      reject(new Error(`Browser server exited with code ${code} before becoming ready — is Node.js and Google Chrome installed? See data/app.log for its stderr.`))
+    })
 
+    ;(async () => {
+      const decoder = new TextDecoder()
+      const reader = proc.stdout.getReader()
+      let line = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        line += decoder.decode(value, { stream: true })
+        const match = line.match(/READY:(\d+)/)
+        if (match) {
+          clearTimeout(timer)
+          resolve(parseInt(match[1]!, 10))
+          return
+        }
+      }
+    })().catch((err) => {
+      clearTimeout(timer)
+      reject(err)
+    })
+  }).catch((err) => {
+    proc.kill()
+    throw err
+  })
+
+  serverPort = port
   serverProc = proc
-  return serverPort!
+  return port
+}
+
+/** Appends the auth token to a browser-server path. Exported for verify-login. */
+export function browserServerUrl(path: string, port = serverPort): string {
+  if (port === null) throw new Error('Browser server not started')
+  const sep = path.includes('?') ? '&' : '?'
+  return `http://127.0.0.1:${port}${path}${sep}token=${serverToken}`
 }
 
 async function httpGet(path: string): Promise<unknown> {
-  const port = serverPort
-  if (port === null) throw new Error('Browser server not started')
-  const res = await fetch(`http://127.0.0.1:${port}${path}`)
+  const res = await fetch(browserServerUrl(path))
   return res.json()
 }
 
@@ -114,7 +161,7 @@ export async function openLoginTabs(linkedinUrl: string, gmailUrl: string): Prom
 export async function shutdownBrowserServer(): Promise<void> {
   if (serverPort !== null) {
     try {
-      await fetch(`http://127.0.0.1:${serverPort}/close`)
+      await fetch(browserServerUrl('/close'))
     } catch {}
   }
   if (serverProc) {

@@ -1,7 +1,10 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs"
 import path from "node:path"
 
-const SETTINGS_PATH = path.join(import.meta.dirname, "..", "..", "..", "data", "tui-settings.json")
+// cwd-relative like every other data file (data/app.log, screenshots, browser
+// state) — NOT relative to this source file, which would write inside the
+// installed package (node_modules) when running as an npm-installed CLI.
+const SETTINGS_PATH = path.join("data", "tui-settings.json")
 
 interface TuiSettings {
   theme?: string

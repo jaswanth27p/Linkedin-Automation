@@ -20,7 +20,9 @@ For the full technical design (and where the real implementation differs from th
 
 ## Requirements
 
-- [Bun](https://bun.sh/) (this project runs entirely on Bun — no Node.js needed to run it, though Playwright's browser download requires the usual OS dependencies)
+- [Bun](https://bun.sh/) >= 1.3 (the app itself runs on Bun)
+- [Node.js](https://nodejs.org/) >= 18 (the browser subprocess deliberately runs under plain Node, not Bun — see `CLAUDE.md` for why)
+- Google Chrome (stable) installed — the app drives your system Chrome, not a bundled Chromium, so Google sign-in doesn't flag it as insecure
 - [Docker](https://www.docker.com/) (for Postgres + Redis — or point at existing instances of both, see below)
 - An [OpenCode Zen](https://opencode.ai/docs/zen) API key (`OPENCODE_API_KEY`) — this is what powers every agent's LLM calls. Free/low-cost models are available; see the model notes below.
 - A LinkedIn account you're comfortable automating job applications from. **You are responsible for how you use this tool against LinkedIn's Terms of Service** — this project doesn't attempt to hide or disguise its automation.
@@ -114,11 +116,14 @@ export default {
   model: 'opencode-go/deepseek-v4-flash',  // 'provider/model' — see Model notes below.
   search: {
     irrelevantBailRatio: 0.5,         // Bail out of a search results page once this fraction of scanned jobs are irrelevant.
+    maxJobsPerRun: 25,                // Cap on job detail opens per search run (LinkedIn rate-limit guard).
+    minNavDelayMs: 3000,              // Randomized human-like pause after each browser navigation…
+    maxNavDelayMs: 8000,              // …between these two bounds.
   },
-} satisfies AppConfig
+}
 ```
 
-`model` and `search.irrelevantBailRatio` can also be changed at runtime without restarting, via `/set model <name>` and `/set irrelevantBailRatio <0-1>` in the app.
+`model` and every `search.*` number can also be changed at runtime without restarting, via `/set model <name>`, `/set irrelevantBailRatio <0-1>`, `/set maxJobsPerRun <n>`, etc.
 
 ### `profile.json`
 
@@ -151,19 +156,27 @@ Once `/verify-login` succeeds, every command below is available. Commands are sc
 
 | Command | Tab | What it does |
 |---|---|---|
-| `/verify-login` | global | Check LinkedIn login status; unlocks the app once it passes |
-| `/tab <search\|easy\|external>` | global | Switch the active tab |
-| `/set <concurrency\|model\|irrelevantBailRatio> <value>` | global | Change a runtime setting without restarting |
+| `/verify-login` | global | Check LinkedIn/Gmail login status; unlocks the app once LinkedIn passes |
+| `/tab [search\|easy\|external\|careers]` | global | Switch the active tab (no arg opens a picker) |
+| `/theme [name]` | global | Switch color theme (no arg opens a picker) |
+| `/set <setting> <value>` | global | Change a runtime setting (`concurrency`, `model`, `irrelevantBailRatio`, `maxJobsPerRun`, `minNavDelayMs`, `maxNavDelayMs`) without restarting |
 | `/help` | global | List commands available on the current tab |
 | `/exit` | global | Close the browser and quit (`Ctrl+Q` also works) |
 | `/search-urls` | search | Run the URLs from `linkedin-auto.config.ts`'s `mustCheckUrls` |
-| `/search-describe <free text>` | search | Turn a plain-English description into search URLs, then run them |
+| `/search-describe [free text]` | search | Turn a plain-English description (default: config requirements) into search URLs, then run them |
 | `/search-resume` | search | Infer search filters from `resume.md`, then run them |
 | `/stop-search` | search | Stop an in-progress search run |
+| `/auto-on loop` / `/auto-on interval <1h30m>` | search | Rotate urls→describe→resume automatically and start both apply workers |
+| `/auto-off` | search | Stop the auto-mode rotation |
 | `/process-easy-queue` | easy | Start working through queued Easy Apply jobs |
 | `/stop-easy-queue` | easy | Stop the Easy Apply worker |
 | `/process-external-queue` | external | Start working through queued external-apply jobs |
 | `/stop-external-queue` | external | Stop the external-apply worker |
+| `/add-career-url <url> [label]` | careers | Track an external company careers page |
+| `/check-careers` | careers | Re-scan every tracked career page for new relevant postings |
+| `/stop-careers` | careers | Stop an in-progress career-page check |
+
+A small review dashboard also runs at `http://127.0.0.1:4870` (loopback only; port via `DASHBOARD_PORT`) — today's stats, application history, and a review page where you can mark recorded answers correct/wrong (corrections feed back into `profile.json`).
 
 **When an agent needs your input** — an application question it can't answer, an email verification code, a stuck checkpoint — the input box automatically switches from command mode to plain-text answer mode (the sidebar highlights which tab is waiting, and shows the question). Just type your answer and press Enter; the agent resumes with it.
 
@@ -185,13 +198,3 @@ Once `/verify-login` succeeds, every command below is available. Commands are sc
 
 There's no automated end-to-end test against real LinkedIn or real job sites — by design (ToS risk, fragility of testing against someone else's live UI). Unit and DB-integration tests cover the logic; running the app for real against your own LinkedIn account is the acceptance check.
 
-## Troubleshooting
-
-- **`bun run dev` fails immediately with a Postgres/Redis connection error** — confirm `docker compose ps` shows both containers healthy, and that `DATABASE_URL`/`REDIS_URL` in `.env` match the ports `docker-compose.yml` actually exposes (`5433`/`6380` by default).
-- **A command says "not implemented" or does nothing** — make sure `/verify-login` has succeeded first; every command except the global ones is locked until then.
-- **Login doesn't persist across restarts** — check that `data/browser-storage-state.json` isn't stuck at `{"cookies":{}}` (should be an array, e.g. `{"cookies":[...]}`); delete it and log in again if so.
-- **The app hangs and won't exit after `/exit`** — this shouldn't happen (queue workers and the DB pool are stopped on shutdown), but if it does, `Ctrl+Break`/closing the terminal window will force it.
-
-## Project status
-
-All four phases are implemented: the TUI shell and login bootstrap, the search agent, the easy-apply agent, and the external-apply agent. See the [design spec](docs/superpowers/specs/2026-07-14-tui-rebuild-design.md) for full detail on each, including where the real implementation ended up deviating from the original plan.

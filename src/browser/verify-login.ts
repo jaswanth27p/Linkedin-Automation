@@ -1,5 +1,5 @@
 import { setSessionStatus, isUnlocked, pushLog, appState } from '../state/app-state.ts'
-import { getBrowserServerPort } from './session.ts'
+import { getBrowserServerPort, browserServerUrl } from './session.ts'
 import { logger } from '../utils/logger.ts'
 
 let autoVerifyTimer: ReturnType<typeof setInterval> | null = null
@@ -67,8 +67,8 @@ export function stopLoginAutoVerify(): void {
 
 export async function verifyLogin(serverPort: number): Promise<{ linkedin: boolean; gmail: boolean }> {
   const [linkedinRes, gmailRes] = await Promise.all([
-    fetch(`http://127.0.0.1:${serverPort}/page-url?tab=0`).then(r => r.json()).catch(() => ({ url: '' })),
-    fetch(`http://127.0.0.1:${serverPort}/page-url?tab=1`).then(r => r.json()).catch(() => ({ url: '' })),
+    fetch(browserServerUrl('/page-url?tab=0', serverPort)).then(r => r.json()).catch(() => ({ url: '' })),
+    fetch(browserServerUrl('/page-url?tab=1', serverPort)).then(r => r.json()).catch(() => ({ url: '' })),
   ])
 
   const pageUrl = (linkedinRes.url || '').toLowerCase()

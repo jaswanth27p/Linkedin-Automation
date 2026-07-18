@@ -596,6 +596,9 @@ async function runSearchUrlsInner(config: AppConfig, urls: string[]): Promise<Se
     return { scanned: ctx.scanned, relevant: ctx.relevant, skipped: ctx.skipped, urlsTried: triedUrls }
   } finally {
     activeAbort = null
+    // Always drop back to idle — without this, a thrown error (surfaced to the
+    // user by the command layer) left the sidebar stuck on "running" forever.
+    setAgentStatus(SEARCH_TAB, 'idle', null)
   }
 }
 

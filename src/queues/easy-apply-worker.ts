@@ -1,5 +1,5 @@
 import { Worker, type Job } from 'bullmq'
-import { and, eq, gte } from 'drizzle-orm'
+import { and, count, eq, gte } from 'drizzle-orm'
 import { getRedisConnectionOptions } from './connection.ts'
 import { getApplyQueueCounts } from './apply-queues.ts'
 import { processEasyApplyJob } from '../agents/easy-apply-agent.ts'
@@ -21,10 +21,10 @@ function startOfToday(): Date {
 async function appliedTodayCount(): Promise<number> {
   const db = getDb()
   const rows = await db
-    .select({ id: applications.id })
+    .select({ n: count() })
     .from(applications)
     .where(and(eq(applications.status, 'applied'), gte(applications.createdAt, startOfToday())))
-  return rows.length
+  return rows[0]?.n ?? 0
 }
 
 export function isEasyApplyWorkerRunning(): boolean {

@@ -67,13 +67,39 @@ export function registerGlobalCommands(): void {
     run: (ctx) => {
       const [key, ...rest] = ctx.args
       const value = rest.join(' ')
-      if (key === 'concurrency') setSetting('concurrency', Number(value))
-      else if (key === 'model') setSetting('model', value)
-      else if (key === 'irrelevantBailRatio') setSetting('irrelevantBailRatio', Number(value))
-      else if (key === 'maxJobsPerRun') setSetting('maxJobsPerRun', Number(value))
-      else if (key === 'minNavDelayMs') setSetting('minNavDelayMs', Number(value))
-      else if (key === 'maxNavDelayMs') setSetting('maxNavDelayMs', Number(value))
-      else {
+
+      // Every numeric setting is validated here — an unchecked Number() let
+      // `/set concurrency abc` poison the live settings with NaN.
+      const numericRules: Partial<Record<keyof Settings, { min: number; integer: boolean; max?: number }>> = {
+        concurrency: { min: 1, integer: true },
+        irrelevantBailRatio: { min: 0, max: 1, integer: false },
+        maxJobsPerRun: { min: 1, integer: true },
+        minNavDelayMs: { min: 0, integer: true },
+        maxNavDelayMs: { min: 0, integer: true },
+      }
+
+      if (key === 'model') {
+        if (!value.trim()) {
+          pushLog(appState.activeTab, 'Usage: /set model <model-id>')
+          return
+        }
+        setSetting('model', value.trim())
+      } else if (key && key in numericRules) {
+        const rule = numericRules[key as keyof Settings]!
+        const num = Number(value)
+        if (
+          !value.trim() ||
+          !Number.isFinite(num) ||
+          num < rule.min ||
+          (rule.max !== undefined && num > rule.max) ||
+          (rule.integer && !Number.isInteger(num))
+        ) {
+          const range = rule.max !== undefined ? `${rule.min}-${rule.max}` : `>= ${rule.min}`
+          pushLog(appState.activeTab, `Invalid value for ${key}: "${value}". Expected ${rule.integer ? 'an integer' : 'a number'} ${range}.`)
+          return
+        }
+        setSetting(key as 'concurrency', num)
+      } else {
         pushLog(
           appState.activeTab,
           `Unknown setting: ${key}. Use concurrency, model, irrelevantBailRatio, maxJobsPerRun, minNavDelayMs, or maxNavDelayMs.`,

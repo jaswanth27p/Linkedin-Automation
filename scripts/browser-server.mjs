@@ -7,6 +7,15 @@ import { tmpdir } from 'node:os'
 const PORT = parseInt(process.env.BROWSER_SERVER_PORT || '0', 10)
 const HEADLESS = process.env.LAUNCH_HEADLESS === '1'
 const STORAGE_STATE = process.env.STORAGE_STATE_PATH || ''
+// Shared secret handed to us by the parent process. Every request must carry
+// it (?token=...) — this server can navigate/close a logged-in browser, so it
+// must not be drivable by any other local process or by a web page probing
+// localhost ports. Refuse to start without one rather than run open.
+const AUTH_TOKEN = process.env.BROWSER_SERVER_TOKEN || ''
+if (!AUTH_TOKEN) {
+  process.stderr.write('[browser-server] FATAL: BROWSER_SERVER_TOKEN not set\n')
+  process.exit(1)
+}
 
 const PROFILE_PREFIX = 'linkedin-auto-'
 const userDataDir = join(tmpdir(), `${PROFILE_PREFIX}${Date.now()}`)
@@ -101,16 +110,13 @@ async function saveState() {
 }
 
 const server = createServer(async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
-
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204)
-    return res.end()
-  }
-
   try {
     const url = new URL(req.url || '/', `http://localhost:${PORT}`)
+
+    if (url.searchParams.get('token') !== AUTH_TOKEN) {
+      res.writeHead(403, { 'Content-Type': 'application/json' })
+      return res.end(JSON.stringify({ error: 'forbidden' }))
+    }
 
     if (url.pathname === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' })

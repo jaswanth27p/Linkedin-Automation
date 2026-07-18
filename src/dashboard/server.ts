@@ -208,8 +208,15 @@ let server: ReturnType<typeof Bun.serve> | null = null
 export function startDashboard(): void {
   if (server) return
   const port = Number(process.env.DASHBOARD_PORT) || 4870
-  server = Bun.serve({ port, fetch: handleRequest })
-  logger.info({ port }, 'dashboard: listening')
+  try {
+    // Bind loopback only — this serves the user's application history and
+    // personal answers; it must never be reachable from the LAN.
+    server = Bun.serve({ port, hostname: '127.0.0.1', fetch: handleRequest })
+    logger.info({ port }, 'dashboard: listening')
+  } catch (err) {
+    // A busy port must not take the whole app down — the dashboard is optional.
+    logger.error({ err, port }, 'dashboard: failed to start (port in use?) — continuing without it')
+  }
 }
 
 export function stopDashboard(): void {

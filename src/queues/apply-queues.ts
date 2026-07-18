@@ -18,7 +18,11 @@ function getExternalQueue(): Queue {
 
 export async function enqueueApplyJob(applyType: ApplyType, jobId: string): Promise<void> {
   const queue = applyType === 'easy' ? getEasyQueue() : getExternalQueue()
-  await queue.add('apply', { jobId })
+  // Bounded retention: without these, every completed/failed BullMQ job stays
+  // in Redis forever and the instance grows without limit. The Postgres
+  // `applications` table is the durable record; Redis only needs enough
+  // history to debug recent runs.
+  await queue.add('apply', { jobId }, { removeOnComplete: 500, removeOnFail: 1000 })
 }
 
 export async function getApplyQueueCounts(applyType: ApplyType): Promise<{ waiting: number; active: number }> {

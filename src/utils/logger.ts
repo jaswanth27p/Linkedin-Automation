@@ -36,6 +36,10 @@ export const logger = new Proxy({} as Logger, {
     if (!_logger) {
       createLogger()
     }
-    return (_logger as Logger)[prop as keyof Logger]
+    const value = (_logger as Logger)[prop as keyof Logger]
+    // Bind methods to the real pino instance — calling them with the proxy as
+    // `this` makes pino's internal symbol lookups go back through this handler
+    // on every access, and any internal `this` mutation would silently miss.
+    return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(_logger) : value
   },
 })

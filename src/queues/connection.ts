@@ -7,6 +7,7 @@ export interface RedisConnectionOptions {
   username?: string
   password?: string
   db?: number
+  tls?: Record<string, never>
 }
 
 export function getRedisConnectionOptions(): RedisConnectionOptions {
@@ -20,5 +21,8 @@ export function getRedisConnectionOptions(): RedisConnectionOptions {
     ...(url.username ? { username: decodeURIComponent(url.username) } : {}),
     ...(url.password ? { password: decodeURIComponent(url.password) } : {}),
     ...(db !== undefined && !Number.isNaN(db) ? { db } : {}),
+    // rediss:// (managed Redis providers) means TLS — without this the
+    // connection just hangs against a TLS-only endpoint.
+    ...(url.protocol === 'rediss:' ? { tls: {} } : {}),
   }
 }
