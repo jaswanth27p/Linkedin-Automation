@@ -2,10 +2,14 @@ import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { logger } from '../utils/logger.ts'
+import { setSessionStatus, pushLog, TAB_IDS } from '../state/app-state.ts'
 
 let serverPort: number | null = null
 let serverProc: ReturnType<typeof Bun.spawn> | null = null
 let sharedCdpUrl: string | null = null
+/** Set on a deliberate shutdown, before serverProc.kill() — distinguishes an
+ * expected exit from a crash for the post-startup exit watcher below. */
+let shuttingDownDeliberately = false
 
 /** Shared secret between this process and the browser-server subprocess. Every
  * request must carry it (?token=...) so a random local process or a malicious
@@ -86,6 +90,30 @@ async function ensureBrowserServer(storageStatePath: string): Promise<number> {
 
   serverPort = port
   serverProc = proc
+
+  // Post-startup crash detection. Without this, an unexpected browser-server
+  // death (e.g. Chrome itself crashing) leaves serverPort/sharedCdpUrl
+  // pointing at a dead endpoint — every agent tool call then fails with a
+  // generic "Browser was closed externally" one at a time, with no single
+  // clear signal that the whole session needs restarting. Surface it once,
+  // loudly, in every tab.
+  proc.exited.then((code) => {
+    if (shuttingDownDeliberately) return
+    if (serverProc !== proc) return // superseded by a later restart, if any
+    logger.error({ code }, 'browser-server exited unexpectedly')
+    serverPort = null
+    serverProc = null
+    sharedCdpUrl = null
+    setSessionStatus('linkedin', false)
+    setSessionStatus('gmail', false)
+    for (const tab of TAB_IDS) {
+      pushLog(
+        tab,
+        `The browser process crashed unexpectedly (exit code ${code}). See data/app.log for details. Restart the app to continue — /verify-login will not recover this.`,
+      )
+    }
+  })
+
   return port
 }
 
@@ -159,6 +187,7 @@ export async function openLoginTabs(linkedinUrl: string, gmailUrl: string): Prom
 }
 
 export async function shutdownBrowserServer(): Promise<void> {
+  shuttingDownDeliberately = true
   if (serverPort !== null) {
     try {
       await fetch(browserServerUrl('/close'))

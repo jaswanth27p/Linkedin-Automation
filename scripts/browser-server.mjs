@@ -17,6 +17,22 @@ if (!AUTH_TOKEN) {
   process.exit(1)
 }
 
+// Playwright's own internals occasionally race against themselves — e.g. a JS
+// dialog (alert/confirm/beforeunload) that gets auto-dismissed by Playwright's
+// no-listener default at the same moment the page closes it another way,
+// producing an unhandled `ProtocolError: ... No dialog is showing`. Node's
+// default for an unhandled rejection is to crash the process; without a
+// handler here, one such internal race kills the whole browser (and every
+// agent's CDP connection with it) instead of just logging and continuing.
+// This subprocess only holds a browser session — surviving is strictly
+// better than dying on a transient internal Playwright error.
+process.on('unhandledRejection', (err) => {
+  process.stderr.write(`[browser-server] unhandled rejection (ignored, browser stays up): ${err?.stack || err}\n`)
+})
+process.on('uncaughtException', (err) => {
+  process.stderr.write(`[browser-server] uncaught exception (ignored, browser stays up): ${err?.stack || err}\n`)
+})
+
 const PROFILE_PREFIX = 'linkedin-auto-'
 const userDataDir = join(tmpdir(), `${PROFILE_PREFIX}${Date.now()}`)
 process.stderr.write(`[browser-server] userDataDir: ${userDataDir}\n`)

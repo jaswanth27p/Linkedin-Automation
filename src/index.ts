@@ -16,6 +16,21 @@ import { closeApplyQueues, getApplyQueueCounts } from './queues/apply-queues.ts'
 import { startDashboard, stopDashboard } from './dashboard/server.ts'
 import { mountTui, destroyTui } from './tui/index.tsx'
 
+// Last-resort safety net: opentui owns the terminal once the TUI is mounted,
+// so ANY raw stdout/stderr write (which is exactly what Node's default
+// unhandled-rejection/exception handler does) lands on top of its frame,
+// outside opentui's own text buffer — unreadable and uncopyable, since it's
+// not part of what the TUI's own selection/scrollback can see. Route these
+// through the file-only logger instead. Does not exit the process — an
+// unexpected rejection from, say, a stray background fetch shouldn't kill an
+// otherwise-fine session; data/app.log is where to look afterward.
+process.on('unhandledRejection', (reason) => {
+  logger.error({ err: reason }, 'unhandled rejection')
+})
+process.on('uncaughtException', (err) => {
+  logger.error({ err }, 'uncaught exception')
+})
+
 let shuttingDown = false
 
 async function cleanup() {
