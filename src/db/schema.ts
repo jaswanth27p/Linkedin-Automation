@@ -13,7 +13,7 @@ export const jobs = pgTable('jobs', {
    * this column existed came from the LinkedIn search agent. */
   source: text('source', { enum: ['linkedin', 'career_page'] }).notNull().default('linkedin'),
   status: text('status', {
-    enum: ['discovered', 'queued', 'needs_input', 'applied', 'failed', 'skipped'],
+    enum: ['discovered', 'queued', 'external_saved', 'needs_input', 'applied', 'failed', 'skipped'],
   }).notNull().default('discovered'),
   relevanceReason: text('relevance_reason'),
   createdAt: timestamp('created_at').defaultNow(),

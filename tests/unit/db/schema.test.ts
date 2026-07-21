@@ -26,6 +26,25 @@ describe('db schema', () => {
     await db.delete(jobs).where(eq(jobs.id, 'test-job-1'))
   })
 
+  test('accepts external_saved as a job status', async () => {
+    const db = getDb()
+    await db.insert(jobs).values({
+      id: 'test-job-external-saved',
+      title: 'Senior Engineer',
+      company: 'Acme',
+      applyUrl: 'https://boards.greenhouse.io/acme/jobs/1',
+      applyType: 'external',
+      sourceUrl: 'https://linkedin.com/jobs/search/?keywords=engineer',
+      status: 'external_saved',
+    }).onConflictDoNothing()
+
+    const rows = await db.select().from(jobs).where(eq(jobs.id, 'test-job-external-saved'))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.status).toBe('external_saved')
+
+    await db.delete(jobs).where(eq(jobs.id, 'test-job-external-saved'))
+  })
+
   test('applications.answers round-trips a recorded-answer array', async () => {
     const db = getDb()
     await db.insert(jobs).values({
