@@ -37,7 +37,7 @@ export function startEasyApplyWorker(): void {
   worker = new Worker(
     'easy-apply',
     async (job: Job<{ jobId: string }>) => {
-      const [counts, appliedToday] = await Promise.all([getApplyQueueCounts('easy'), appliedTodayCount()])
+      const [counts, appliedToday] = await Promise.all([getApplyQueueCounts(), appliedTodayCount()])
       setAgentStatus(EASY_TAB, 'running', `queue: ${counts.waiting} left, applied today: ${appliedToday}`)
       await processEasyApplyJob(job.data.jobId)
     },

@@ -85,7 +85,7 @@ async function main() {
   // Redis otherwise shows up as a silent hang the first time a job is queued.
   try {
     await Promise.race([
-      getApplyQueueCounts('easy'),
+      getApplyQueueCounts(),
       new Promise((_, reject) => setTimeout(() => reject(new Error('timed out after 5s')), 5000)),
     ])
   } catch (err) {
