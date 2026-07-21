@@ -59,3 +59,32 @@ describe('career-page job dedup via onConflictDoNothing', () => {
     await db.delete(jobs).where(eq(jobs.id, id))
   })
 })
+
+describe('career-page job status on relevant postings', () => {
+  test('a relevant posting is inserted with status external_saved, not queued', async () => {
+    const db = getDb()
+    const applyUrl = 'https://acme.com/jobs/status-test'
+    const id = applyUrlToJobId(applyUrl)
+
+    await db
+      .insert(jobs)
+      .values({
+        id,
+        title: 'Platform Engineer',
+        company: 'Acme',
+        applyUrl,
+        applyType: 'external',
+        sourceUrl: 'https://acme.com/careers',
+        source: 'career_page',
+        status: 'external_saved',
+        relevanceReason: 'stack match',
+      })
+      .onConflictDoNothing()
+
+    const rows = await db.select().from(jobs).where(eq(jobs.id, id))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.status).toBe('external_saved')
+
+    await db.delete(jobs).where(eq(jobs.id, id))
+  })
+})

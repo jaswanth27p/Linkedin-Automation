@@ -11,7 +11,7 @@ import { jobs, careerPages, careerPageScans } from '../db/schema.ts'
 import { loadResume, loadProfile } from '../profile/loader.ts'
 import { appState, pushLog, setAgentStatus } from '../state/app-state.ts'
 import { waitForAnswer } from '../state/prompt-channel.ts'
-import { enqueueApplyJob } from '../queues/apply-queues.ts'
+import { notify } from '../notify/notify.ts'
 import { noOpBrowserContextProcessor } from './no-op-browser-context-processor.ts'
 import { getCurrentConfig } from '../config/current.ts'
 import { logger } from '../utils/logger.ts'
@@ -44,9 +44,9 @@ function randomNavDelayMs(): number {
 }
 
 /** Stable id for a career-page posting, derived from its apply URL rather than
- * supplied by the model — stays the same across rescans of the same posting
- * (the actual dedup mechanism, since this agent re-judges every posting every
- * run instead of skipping already-seen ones) and can't be spoofed/mistyped. */
+ * supplied by the model — stays the same across rescans of the same posting,
+ * which is what lets check-posting-seen recognize a posting judged in an
+ * earlier /check-careers run, and can't be spoofed/mistyped. */
 export function applyUrlToJobId(applyUrl: string): string {
   return createHash('sha1').update(applyUrl.trim()).digest('hex')
 }
@@ -127,11 +127,31 @@ async function logCareerStep(
   }
 }
 
+function createCheckPostingSeenTool() {
+  return createTool({
+    id: 'check-posting-seen',
+    description:
+      "Check whether a posting (by its apply URL) has already been judged in a previous /check-careers run. Call this BEFORE reading/judging a posting's detail — if seen is true, skip it entirely, do not re-judge it, do not call report-posting-verdict for it.",
+    inputSchema: z.object({ applyUrl: z.string() }),
+    outputSchema: z.object({ seen: z.boolean() }),
+    execute: async ({ applyUrl }) => {
+      const id = applyUrlToJobId(applyUrl)
+      const db = getDb()
+      const rows = await db.select({ id: jobs.id }).from(jobs).where(eq(jobs.id, id))
+      const seen = rows.length > 0
+      if (seen) {
+        pushLog(CAREERS_TAB, `Skipping a posting (${applyUrl}) — already judged in an earlier check.`)
+      }
+      return { seen }
+    },
+  })
+}
+
 function createReportPostingVerdictTool(ctx: PageScanContext, sourceUrl: string) {
   return createTool({
     id: 'report-posting-verdict',
     description:
-      'Report your relevance judgment for a job posting you just read on this career page. Call this exactly once per posting you inspect — every posting on the page, judged fresh, even if a previous run may have seen it before.',
+      'Report your relevance judgment for a NEW job posting you just read on this career page (one check-posting-seen did NOT flag as seen). Call this exactly once per new posting you judge.',
     inputSchema: z.object({
       title: z.string(),
       company: z.string(),
@@ -148,11 +168,9 @@ function createReportPostingVerdictTool(ctx: PageScanContext, sourceUrl: string)
         ctx.relevant++
         const id = applyUrlToJobId(input.applyUrl)
         const db = getDb()
-        // Same insert-wins-dedup trick as the LinkedIn search agent: this agent
-        // never checks "already seen" before judging (postings get re-judged
-        // every run since career pages change over time), so onConflictDoNothing
-        // + only enqueueing on a real insert is what stops a still-relevant
-        // posting from being queued twice across repeated /check-careers runs.
+        // check-posting-seen already gates re-judgment, but onConflictDoNothing
+        // + only notifying on a real insert stays as a second safety net —
+        // mirrors the pattern in search-agent.ts's report-job.
         const inserted = await db
           .insert(jobs)
           .values({
@@ -164,17 +182,17 @@ function createReportPostingVerdictTool(ctx: PageScanContext, sourceUrl: string)
             applyType: 'external',
             sourceUrl,
             source: 'career_page',
-            status: 'discovered',
+            status: 'external_saved',
             relevanceReason: input.reason,
           })
           .onConflictDoNothing()
           .returning({ id: jobs.id })
 
         if (inserted.length > 0) {
-          await enqueueApplyJob('external', id)
-          pushLog(CAREERS_TAB, `Reviewed "${input.title}" at ${input.company} — suitable. Added to the external apply queue.`)
+          notify({ kind: 'external-job-found', title: input.title, company: input.company, applyUrl: input.applyUrl })
+          pushLog(CAREERS_TAB, `Reviewed "${input.title}" at ${input.company} — suitable. Saved and notified.`)
         } else {
-          pushLog(CAREERS_TAB, `Reviewed "${input.title}" at ${input.company} — suitable, but already queued from an earlier check.`)
+          pushLog(CAREERS_TAB, `Reviewed "${input.title}" at ${input.company} — suitable, but already recorded from an earlier check.`)
         }
       } else {
         ctx.skipped++
@@ -223,32 +241,37 @@ ${JSON.stringify(profile, null, 2)}
 Hiring requirements to match against:
 ${config.requirements}
 
-CRITICAL RULE: report-posting-verdict is the ONLY way a posting is recorded and queued. If you read
-a posting and do NOT call report-posting-verdict for it, that posting is silently lost. Call it
-exactly once per posting you inspect, even if you think you saw it on a previous check — always
-judge fresh, do not skip a posting because it looks familiar.
+CRITICAL RULE: report-posting-verdict is the ONLY way a posting is recorded. If you judge a posting
+and do NOT call report-posting-verdict for it, that judgment is silently lost. Only call it for a
+posting check-posting-seen did NOT flag as already seen — a seen posting must not be re-judged.
 
 Process:
 1. Take a browser_snapshot (interactiveOnly: true unless you need descriptive text) to find the
    postings list on the page.
-2. For each posting: read its title, company (usually "${pageLabel}" itself, but use whatever the
-   page actually states), location if shown, and enough of the description to judge it — either
-   from an already-visible summary/card, or by opening its detail (click or navigate) if the page
-   requires that to see real content. Get its apply link (the URL a candidate would land on to
-   actually apply — construct the full absolute URL if the page only shows a relative href).
-3. Judge relevance by substance, not literal title match: a posting counts as relevant if its real
+2. For each posting: get its apply link first (the URL a candidate would land on to actually apply —
+   construct the full absolute URL if the page only shows a relative href), then call
+   check-posting-seen with that applyUrl BEFORE reading anything else about the posting. If seen is
+   true, skip it entirely — do not read its detail, do not judge it, move to the next posting. This
+   matters: re-judging an already-seen posting wastes effort for no benefit, since it's already
+   recorded.
+3. If not seen: read its title, company (usually "${pageLabel}" itself, but use whatever the page
+   actually states), location if shown, and enough of the description to judge it — either from an
+   already-visible summary/card, or by opening its detail (click or navigate) if the page requires
+   that to see real content.
+4. Judge relevance by substance, not literal title match: a posting counts as relevant if its real
    responsibilities/stack overlap meaningfully with the candidate's actual skills and experience,
    even if the title differs. Still respect the requirements text's hard constraints (seniority,
    location, experience range).
-4. Call report-posting-verdict with title, company, location, applyUrl, verdict ("relevant" or
+5. Call report-posting-verdict with title, company, location, applyUrl, verdict ("relevant" or
    "skip"), and a short reason.
-5. If there's pagination or a "load more" control and you haven't yet covered all postings, use it
+6. If there's pagination or a "load more" control and you haven't yet covered all postings, use it
    and continue from step 1 for the newly-loaded postings.
-6. If you hit a login wall, CAPTCHA, or a page structure you genuinely cannot make sense of, call
+7. If you hit a login wall, CAPTCHA, or a page structure you genuinely cannot make sense of, call
    request-human-input with a clear question, then continue once answered.
 
-Be economical: don't re-open a posting you already judged this run, and don't take a fresh
-browser_snapshot unless the visible content actually changed (new page, new postings loaded).
+Be economical: an already-seen posting costs you one check-posting-seen call and nothing else — no
+detail read, no judgment. Don't take a fresh browser_snapshot unless the visible content actually
+changed (new page, new postings loaded).
 
 Work through every posting visible on this page (and any further pages/loads it offers) before
 finishing your turn.
@@ -293,6 +316,7 @@ export async function runCareerCheck(): Promise<void> {
             browser,
             inputProcessors: [noOpBrowserContextProcessor],
             tools: {
+              checkPostingSeen: createCheckPostingSeenTool(),
               reportPostingVerdict: createReportPostingVerdictTool(ctx, page.url),
               requestHumanInput: createRequestHumanInputTool(),
             },
