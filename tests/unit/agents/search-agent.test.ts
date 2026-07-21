@@ -1,11 +1,9 @@
 import { describe, test, expect } from 'bun:test'
-import { computeMidPageContinueDecision, computeNextPageDecision, buildScanInstructions } from '../../../src/agents/search-agent.ts'
-import { loadConfig } from '../../../src/config/loader.ts'
+import { computeMidPageContinueDecision, buildScanInstructions } from '../../../src/agents/search-agent.ts'
 
 describe('computeMidPageContinueDecision', () => {
-  test('continues regardless of skip ratio', () => {
-    expect(computeMidPageContinueDecision({ scanned: 3, aborted: false })).toBe(true)
-    expect(computeMidPageContinueDecision({ scanned: 1, aborted: false })).toBe(true)
+  test('continues when nothing has been scanned yet', () => {
+    expect(computeMidPageContinueDecision({ scanned: 0, aborted: false })).toBe(true)
   })
 
   test('stops immediately when aborted', () => {
@@ -25,55 +23,12 @@ describe('computeMidPageContinueDecision', () => {
   })
 })
 
-describe('computeNextPageDecision', () => {
-  test('continues when nothing scanned yet', () => {
-    expect(computeNextPageDecision({ scanned: 0, skipped: 0, bailRatio: 0.5, aborted: false })).toBe(true)
-  })
-
-  test('continues while skip ratio is below the bail ratio', () => {
-    expect(computeNextPageDecision({ scanned: 4, skipped: 1, bailRatio: 0.5, aborted: false })).toBe(true)
-  })
-
-  test('does not bail on an early skip below the minimum sample size', () => {
-    expect(computeNextPageDecision({ scanned: 1, skipped: 1, bailRatio: 0.5, aborted: false })).toBe(true)
-    expect(computeNextPageDecision({ scanned: 2, skipped: 1, bailRatio: 0.5, aborted: false })).toBe(true)
-    expect(computeNextPageDecision({ scanned: 3, skipped: 3, bailRatio: 0.5, aborted: false })).toBe(true)
-  })
-
-  test('stops once skip ratio reaches the bail ratio', () => {
-    expect(computeNextPageDecision({ scanned: 4, skipped: 2, bailRatio: 0.5, aborted: false })).toBe(false)
-  })
-
-  test('stops once skip ratio exceeds the bail ratio', () => {
-    expect(computeNextPageDecision({ scanned: 5, skipped: 4, bailRatio: 0.5, aborted: false })).toBe(false)
-  })
-
-  test('stops immediately when aborted, regardless of ratio', () => {
-    expect(computeNextPageDecision({ scanned: 1, skipped: 0, bailRatio: 0.5, aborted: true })).toBe(false)
-  })
-
-  test('stops once the per-run job cap is reached, even with a healthy skip ratio', () => {
-    expect(
-      computeNextPageDecision({ scanned: 25, skipped: 0, bailRatio: 0.5, aborted: false, maxJobsPerRun: 25 }),
-    ).toBe(false)
-  })
-
-  test('keeps going below the cap', () => {
-    expect(
-      computeNextPageDecision({ scanned: 10, skipped: 1, bailRatio: 0.5, aborted: false, maxJobsPerRun: 25 }),
-    ).toBe(true)
-  })
-
-  test('no cap applied when maxJobsPerRun is omitted', () => {
-    expect(computeNextPageDecision({ scanned: 1000, skipped: 0, bailRatio: 0.5, aborted: false })).toBe(true)
-  })
-})
-
 describe('buildScanInstructions', () => {
-  test('judges relevance by substance over literal title, and requests interactiveOnly snapshots', async () => {
-    const config = await loadConfig('./linkedin-auto.config.ts')
-    const instructions = await buildScanInstructions(config)
-    expect(instructions).toContain('Judge by substance, not literal title match')
+  test('describes the dedupe-first, no-judgment flow', async () => {
+    const instructions = await buildScanInstructions()
+    expect(instructions).toContain('There is no relevance judgment to make')
+    expect(instructions).toContain('check-already-seen')
+    expect(instructions).toContain('report-job')
     expect(instructions).toContain('interactiveOnly: true')
   })
 })
