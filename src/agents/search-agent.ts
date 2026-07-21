@@ -490,7 +490,7 @@ async function runSearchUrlsInner(config: AppConfig, urls: string[]): Promise<Se
   await db.insert(searchRuns).values({ id: runId, urlsTried: [] })
 
   const ctx: ScanRunContext = {
-    bailRatio: appState.settings.irrelevantBailRatio,
+    bailRatio: 0.5,
     maxJobsPerRun: appState.settings.maxJobsPerRun,
     signal: abort.signal,
     scanned: 0,
@@ -519,7 +519,7 @@ async function runSearchUrlsInner(config: AppConfig, urls: string[]): Promise<Se
 
     const triedUrls: string[] = []
     for (const url of urls) {
-      ctx.bailRatio = appState.settings.irrelevantBailRatio
+      ctx.bailRatio = 0.5
       if (abort.signal.aborted) break
 
       setAgentStatus(SEARCH_TAB, 'running', `scanning ${url}`)

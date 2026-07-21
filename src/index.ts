@@ -103,7 +103,6 @@ async function main() {
   initAppState({
     concurrency: config.concurrency,
     model: config.model,
-    irrelevantBailRatio: config.search.irrelevantBailRatio,
     maxJobsPerRun: config.search.maxJobsPerRun,
     minNavDelayMs: config.search.minNavDelayMs,
     maxNavDelayMs: config.search.maxNavDelayMs,

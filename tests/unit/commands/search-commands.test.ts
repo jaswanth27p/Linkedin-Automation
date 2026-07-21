@@ -12,13 +12,13 @@ function makeConfig(requirements: string): AppConfig {
     concurrency: 1,
     model: 'test',
     profileFiles: { resume: './resume.md', profile: './profile.json' },
-    search: { irrelevantBailRatio: 0.5, maxJobsPerRun: 25, minNavDelayMs: 3000, maxNavDelayMs: 8000 },
+    search: { maxJobsPerRun: 25, minNavDelayMs: 3000, maxNavDelayMs: 8000 },
   }
 }
 
 beforeEach(() => {
   clearRegistryForTest()
-  initAppState({ concurrency: 1, model: 'test', irrelevantBailRatio: 0.5, maxJobsPerRun: 25, minNavDelayMs: 3000, maxNavDelayMs: 8000 })
+  initAppState({ concurrency: 1, model: 'test', maxJobsPerRun: 25, minNavDelayMs: 3000, maxNavDelayMs: 8000 })
   registerSearchCommands()
 })
 
