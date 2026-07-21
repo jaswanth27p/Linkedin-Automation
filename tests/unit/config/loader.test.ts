@@ -6,7 +6,6 @@ describe('loadConfig', () => {
     const config = await loadConfig('./linkedin-auto.config.ts')
     expect(config.mustCheckUrls).toHaveLength(1)
     expect(config.requirements).toContain('remote')
-    expect(config.search.irrelevantBailRatio).toBe(0.5)
     expect(config.profileFiles.resume).toBe('./resume.md')
     expect(config.profileFiles.profile).toBe('./profile.json')
   })

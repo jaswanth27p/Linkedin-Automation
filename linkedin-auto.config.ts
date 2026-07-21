@@ -19,7 +19,6 @@ export default {
   },
   model: "opencode-go/deepseek-v4-pro",
   search: {
-    irrelevantBailRatio: 0.5,
     // LinkedIn rate-limit guards. maxJobsPerRun caps job detail opens per run;
     // min/maxNavDelayMs bracket the randomized pause after each browser
     // navigation. Raise the delays / lower the cap to be gentler on the account.
