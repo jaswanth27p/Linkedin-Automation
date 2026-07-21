@@ -49,6 +49,12 @@ describe('dashboard handleRequest', () => {
     expect(await res.text()).toContain('Review')
   })
 
+  test('GET /external-jobs renders the external jobs list', async () => {
+    const res = await handleRequest(new Request('http://localhost/external-jobs'))
+    expect(res.status).toBe(200)
+    expect(await res.text()).toContain('External Jobs')
+  })
+
   test('unknown route returns 404', async () => {
     const res = await handleRequest(new Request('http://localhost/nope'))
     expect(res.status).toBe(404)

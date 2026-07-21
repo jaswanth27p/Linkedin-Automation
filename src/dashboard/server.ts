@@ -28,7 +28,7 @@ function page(body: string): Response {
   nav a { margin-right: 1rem; }
   fieldset { margin-bottom: 1rem; }
 </style>
-</head><body><nav><a href="/">Summary</a><a href="/applications">Applications</a><a href="/review">Review</a><a href="/career-pages">Career Pages</a></nav>${body}</body></html>`,
+</head><body><nav><a href="/">Summary</a><a href="/applications">Applications</a><a href="/external-jobs">External Jobs</a><a href="/review">Review</a><a href="/career-pages">Career Pages</a></nav>${body}</body></html>`,
     { headers: { 'Content-Type': 'text/html; charset=utf-8' } },
   )
 }
@@ -39,24 +39,19 @@ async function renderSummary(): Promise<Response> {
 
   const todayRuns = await db.select().from(searchRuns).where(gte(searchRuns.startedAt, since))
   const scanned = todayRuns.reduce((sum, r) => sum + r.scannedCount, 0)
-  const relevant = todayRuns.reduce((sum, r) => sum + r.relevantCount, 0)
-  const skipped = todayRuns.reduce((sum, r) => sum + r.skippedCount, 0)
+  const found = todayRuns.reduce((sum, r) => sum + r.relevantCount, 0)
 
   const todayApps = await db.select().from(applications).where(gte(applications.createdAt, since))
   const applied = todayApps.filter((a) => a.status === 'applied').length
   const failed = todayApps.filter((a) => a.status === 'failed').length
 
-  const [easyCounts, externalCounts] = await Promise.all([
-    getApplyQueueCounts('easy'),
-    getApplyQueueCounts('external'),
-  ])
+  const easyCounts = await getApplyQueueCounts()
 
   return page(`
     <h1>Today</h1>
-    <p>Search: ${scanned} scanned, ${relevant} relevant, ${skipped} skipped (${todayRuns.length} run(s))</p>
+    <p>Search: ${scanned} scanned, ${found} found (${todayRuns.length} run(s))</p>
     <p>Applications: ${applied} applied, ${failed} failed</p>
-    <p>Queues: Easy Apply ${easyCounts.waiting} waiting / ${easyCounts.active} active —
-       External ${externalCounts.waiting} waiting / ${externalCounts.active} active</p>
+    <p>Easy Apply queue: ${easyCounts.waiting} waiting / ${easyCounts.active} active</p>
   `)
 }
 
@@ -97,6 +92,41 @@ async function renderApplications(): Promise<Response> {
 
   return page(
     `<h1>Applications</h1><table><tr><th>Job</th><th>Company</th><th>Source</th><th>Status</th><th>Answers</th><th>When</th></tr>${items}</table>`,
+  )
+}
+
+async function renderExternalJobs(): Promise<Response> {
+  const db = getDb()
+  const rows = await db
+    .select({
+      title: jobs.title,
+      company: jobs.company,
+      applyUrl: jobs.applyUrl,
+      source: jobs.source,
+      createdAt: jobs.createdAt,
+    })
+    .from(jobs)
+    .where(eq(jobs.status, 'external_saved'))
+    .orderBy(desc(jobs.createdAt))
+    .limit(200)
+
+  const items = rows
+    .map(
+      (r) => `
+    <tr>
+      <td>${escapeHtml(r.title)}</td>
+      <td>${escapeHtml(r.company)}</td>
+      <td>${SOURCE_LABELS[r.source] ?? r.source}</td>
+      <td><a href="${escapeHtml(r.applyUrl)}">${escapeHtml(r.applyUrl)}</a></td>
+      <td>${r.createdAt?.toISOString() ?? ''}</td>
+    </tr>`,
+    )
+    .join('')
+
+  return page(
+    `<h1>External Jobs</h1><table><tr><th>Job</th><th>Company</th><th>Source</th><th>Apply link</th><th>Found</th></tr>${items}</table>${
+      rows.length === 0 ? '<p>No external jobs saved yet.</p>' : ''
+    }`,
   )
 }
 
@@ -197,6 +227,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   const url = new URL(req.url)
   if (req.method === 'GET' && url.pathname === '/') return renderSummary()
   if (req.method === 'GET' && url.pathname === '/applications') return renderApplications()
+  if (req.method === 'GET' && url.pathname === '/external-jobs') return renderExternalJobs()
   if (req.method === 'GET' && url.pathname === '/review') return renderReview()
   if (req.method === 'GET' && url.pathname === '/career-pages') return renderCareerPages()
   if (req.method === 'POST' && url.pathname === '/review/feedback') return handleFeedback(req)
