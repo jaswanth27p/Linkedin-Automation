@@ -15,6 +15,7 @@ import { loadResume, loadProfile, saveLearnedAnswer } from '../profile/loader.ts
 import { findLearnedAnswer } from '../profile/answer-matching.ts'
 import { appState, pushLog, setAgentStatus } from '../state/app-state.ts'
 import { waitForAnswer } from '../state/prompt-channel.ts'
+import { notify } from '../notify/notify.ts'
 import { noOpBrowserContextProcessor } from './no-op-browser-context-processor.ts'
 import type { AppConfig } from '../config/schema.ts'
 import type { TabId } from '../state/types.ts'
@@ -155,6 +156,7 @@ export function createReportSubmissionTool(job: JobRecord, browser: AgentBrowser
         })
         await db.update(jobs).set({ status: 'applied', updatedAt: new Date() }).where(eq(jobs.id, job.id))
         pushLog(EASY_TAB, `Applied: ${job.title} @ ${job.company}`)
+        notify({ kind: 'easy-apply-result', success: true, title: job.title, company: job.company })
       } else {
         await db.insert(applications).values({
           id: randomUUID(),
@@ -165,6 +167,7 @@ export function createReportSubmissionTool(job: JobRecord, browser: AgentBrowser
         })
         await db.update(jobs).set({ status: 'failed', updatedAt: new Date() }).where(eq(jobs.id, job.id))
         pushLog(EASY_TAB, `Failed: ${job.title} @ ${job.company} — ${input.error ?? 'unknown failure'}`)
+        notify({ kind: 'easy-apply-result', success: false, title: job.title, company: job.company, error: input.error })
       }
 
       return { ok: true }
