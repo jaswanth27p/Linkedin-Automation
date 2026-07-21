@@ -1,13 +1,7 @@
 import { registerCommand } from './registry.ts'
 import { pushLog } from '../state/app-state.ts'
 import { getCurrentConfig } from '../config/current.ts'
-import {
-  runSearchUrls,
-  generateSearchUrlsFromText,
-  generateSearchUrlsFromResume,
-  stopSearch,
-  isSearchRunning,
-} from '../agents/search-agent.ts'
+import { runSearchUrls, stopSearch, isSearchRunning } from '../agents/search-agent.ts'
 import { startAutoMode, stopAutoMode, parseDurationMs } from '../agents/search-scheduler.ts'
 
 const SEARCH_TAB = 'search'
@@ -28,54 +22,7 @@ export function registerSearchCommands(): void {
     run: async () => {
       if (!guardNotRunning()) return
       const config = getCurrentConfig()
-      await runSearchUrls(config, config.mustCheckUrls)
-    },
-  })
-
-  registerCommand({
-    name: 'search-describe',
-    scope: 'search',
-    description: '/search-describe [free text] — describe the jobs you want (defaults to config requirements)',
-    run: async (ctx) => {
-      if (!guardNotRunning()) return
-      const config = getCurrentConfig()
-      // Text is optional: fall back to the requirements in linkedin-auto.config.ts.
-      const describeText = ctx.rawArgs.trim() || config.requirements.trim()
-      if (!describeText) {
-        pushLog(SEARCH_TAB, 'No description given and no requirements set in linkedin-auto.config.ts.')
-        return
-      }
-      pushLog(
-        SEARCH_TAB,
-        ctx.rawArgs.trim()
-          ? 'Generating search URLs from your description...'
-          : 'No text given — generating search URLs from config requirements...',
-      )
-      const urls = await generateSearchUrlsFromText(describeText)
-      if (urls.length === 0) {
-        pushLog(SEARCH_TAB, 'Could not generate any search URLs from that description.')
-        return
-      }
-      pushLog(SEARCH_TAB, `Generated ${urls.length} URL(s): ${urls.join(', ')}`)
-      await runSearchUrls(config, urls)
-    },
-  })
-
-  registerCommand({
-    name: 'search-resume',
-    scope: 'search',
-    description: 'Infer search filters from resume.md and run them',
-    run: async () => {
-      if (!guardNotRunning()) return
-      const config = getCurrentConfig()
-      pushLog(SEARCH_TAB, 'Generating search URLs from resume.md...')
-      const urls = await generateSearchUrlsFromResume(config)
-      if (urls.length === 0) {
-        pushLog(SEARCH_TAB, 'Could not generate any search URLs from resume.md.')
-        return
-      }
-      pushLog(SEARCH_TAB, `Generated ${urls.length} URL(s): ${urls.join(', ')}`)
-      await runSearchUrls(config, urls)
+      await runSearchUrls(config.mustCheckUrls)
     },
   })
 
@@ -97,7 +44,7 @@ export function registerSearchCommands(): void {
     name: 'auto-on',
     scope: 'search',
     description:
-      '/auto-on loop | /auto-on interval <duration> (e.g. 1h, 3h, 90m) — schedule urls→describe→resume automatically, and start both apply-queue workers',
+      '/auto-on loop | /auto-on interval <duration> (e.g. 1h, 3h, 90m) — repeatedly run the configured search URLs, and start the easy-apply queue worker',
     run: (ctx) => {
       const mode = ctx.args[0]
       if (mode === 'loop') {
@@ -125,7 +72,7 @@ export function registerSearchCommands(): void {
   registerCommand({
     name: 'auto-off',
     scope: 'search',
-    description: 'Stop the auto-mode search rotation (apply-queue workers keep running)',
+    description: 'Stop the auto-mode search rotation (the easy-apply queue worker keeps running)',
     run: () => stopAutoMode(),
   })
 }

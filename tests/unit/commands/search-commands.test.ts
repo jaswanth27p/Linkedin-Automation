@@ -5,10 +5,10 @@ import { initAppState, appState } from '../../../src/state/app-state.ts'
 import { setCurrentConfig } from '../../../src/config/current.ts'
 import type { AppConfig } from '../../../src/config/schema.ts'
 
-function makeConfig(requirements: string): AppConfig {
+function makeConfig(): AppConfig {
   return {
     mustCheckUrls: [],
-    requirements,
+    requirements: 'placeholder',
     concurrency: 1,
     model: 'test',
     profileFiles: { resume: './resume.md', profile: './profile.json' },
@@ -19,30 +19,26 @@ function makeConfig(requirements: string): AppConfig {
 beforeEach(() => {
   clearRegistryForTest()
   initAppState({ concurrency: 1, model: 'test', maxJobsPerRun: 25, minNavDelayMs: 3000, maxNavDelayMs: 8000 })
+  setCurrentConfig(makeConfig())
   registerSearchCommands()
 })
 
 describe('search commands', () => {
-  test('registers all six search-tab commands', () => {
+  test('registers the four search-tab commands', () => {
     expect(getCommand('search-urls')?.scope).toBe('search')
-    expect(getCommand('search-describe')?.scope).toBe('search')
-    expect(getCommand('search-resume')?.scope).toBe('search')
     expect(getCommand('stop-search')?.scope).toBe('search')
     expect(getCommand('auto-on')?.scope).toBe('search')
     expect(getCommand('auto-off')?.scope).toBe('search')
   })
 
+  test('no longer registers search-describe or search-resume', () => {
+    expect(getCommand('search-describe')).toBeUndefined()
+    expect(getCommand('search-resume')).toBeUndefined()
+  })
+
   test('/stop-search is a no-op with a message when nothing is running', async () => {
     await getCommand('stop-search')!.run({ args: [], rawArgs: '' })
     expect(appState.tabs.search.logs).toContain('No search is running.')
-  })
-
-  test('/search-describe with no text and empty config requirements does not run', async () => {
-    setCurrentConfig(makeConfig('   '))
-    await getCommand('search-describe')!.run({ args: [], rawArgs: '' })
-    expect(appState.tabs.search.logs).toContain(
-      'No description given and no requirements set in linkedin-auto.config.ts.',
-    )
   })
 
   test('/auto-off is a no-op with a message when auto mode is not on', async () => {
