@@ -11,7 +11,6 @@ import { stopSearchAndWait } from './agents/search-agent.ts'
 import { stopAutoModeAndWait } from './agents/search-scheduler.ts'
 import { stopCareerCheckAndWait } from './agents/career-scan-agent.ts'
 import { stopEasyApplyWorker } from './queues/easy-apply-worker.ts'
-import { stopExternalApplyWorker } from './queues/external-apply-worker.ts'
 import { closeApplyQueues, getApplyQueueCounts } from './queues/apply-queues.ts'
 import { startDashboard, stopDashboard } from './dashboard/server.ts'
 import { mountTui, destroyTui } from './tui/index.tsx'
@@ -40,16 +39,15 @@ async function cleanup() {
   destroyTui()
   stopDashboard()
   stopLoginAutoVerify()
-  // Stop all three agents/processes in dependency order: the search agent
-  // first (it's driving the browser directly, no queue to gate it), then
-  // the two queue workers (their open Redis connections keep the process
+  // Stop all agents/processes in dependency order: the search agent first
+  // (it's driving the browser directly, no queue to gate it), then the
+  // easy-apply queue worker (its open Redis connection keeps the process
   // alive indefinitely otherwise), and only once nothing is using the
   // browser anymore do we kill it.
   await stopAutoModeAndWait()
   await stopSearchAndWait()
   await stopCareerCheckAndWait()
   await stopEasyApplyWorker()
-  await stopExternalApplyWorker()
   await closeApplyQueues()
   await shutdownBrowserServer()
   await closeDb()

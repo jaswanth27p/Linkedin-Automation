@@ -8,7 +8,6 @@ import {
   stopSearchAndWait,
 } from './search-agent.ts'
 import { startEasyApplyWorker } from '../queues/easy-apply-worker.ts'
-import { startExternalApplyWorker } from '../queues/external-apply-worker.ts'
 import { logger } from '../utils/logger.ts'
 import type { TabId } from '../state/types.ts'
 import type { AppConfig } from '../config/schema.ts'
@@ -156,11 +155,10 @@ async function runIntervalTick(): Promise<void> {
   await work
 }
 
-/** Starts both apply-queue workers if they aren't already running — both are
- * idempotent no-ops when already started, so this is safe to call unconditionally. */
+/** Starts the easy-apply queue worker if it isn't already running — idempotent
+ * no-op when already started, so this is safe to call unconditionally. */
 function ensureApplyWorkersRunning(): void {
   startEasyApplyWorker()
-  startExternalApplyWorker()
 }
 
 export function startAutoMode(mode: AutoMode, intervalMs?: number): void {
