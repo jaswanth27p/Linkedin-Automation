@@ -1,23 +1,13 @@
 import { getCurrentConfig } from '../config/current.ts'
 import { pushLog } from '../state/app-state.ts'
-import {
-  runSearchUrls,
-  generateSearchUrlsFromText,
-  generateSearchUrlsFromResume,
-  isSearchRunning,
-  stopSearchAndWait,
-} from './search-agent.ts'
+import { runSearchUrls, isSearchRunning, stopSearchAndWait } from './search-agent.ts'
 import { startEasyApplyWorker } from '../queues/easy-apply-worker.ts'
 import { logger } from '../utils/logger.ts'
 import type { TabId } from '../state/types.ts'
-import type { AppConfig } from '../config/schema.ts'
 
 const SEARCH_TAB: TabId = 'search'
 
 export type AutoMode = 'loop' | 'interval'
-
-const ROTATION_STEPS = ['urls', 'describe', 'resume'] as const
-type RotationStep = (typeof ROTATION_STEPS)[number]
 
 /** Parses a duration string into milliseconds. Accepts `<n>h`, `<n>m`, combined
  * `<n>h<n>m`, or a bare number (interpreted as hours). Returns null (not a throw) on
@@ -57,7 +47,6 @@ interface SchedulerState {
   intervalHandle: ReturnType<typeof setInterval> | null
   loopActive: boolean
   tickRunning: boolean
-  stepIndex: number
 }
 
 const state: SchedulerState = {
@@ -66,10 +55,9 @@ const state: SchedulerState = {
   intervalHandle: null,
   loopActive: false,
   tickRunning: false,
-  stepIndex: 0,
 }
 
-/** Tracks whatever single step/tick is currently in flight, regardless of mode, so
+/** Tracks whatever single run is currently in flight, regardless of mode, so
  * stopAutoModeAndWait can await it on shutdown without caring which mode was active. */
 let activeWorkPromise: Promise<void> | null = null
 
@@ -77,57 +65,29 @@ export function isAutoModeOn(): boolean {
   return state.mode !== null
 }
 
-async function runStep(step: RotationStep, config: AppConfig): Promise<void> {
+async function runConfiguredUrls(): Promise<void> {
   if (isSearchRunning()) {
-    pushLog(SEARCH_TAB, `Auto mode: skipping the ${step} step — a search is already running.`)
+    pushLog(SEARCH_TAB, 'Auto mode: skipping this cycle — a search is already running.')
     return
   }
-
+  const config = getCurrentConfig()
+  if (config.mustCheckUrls.length === 0) {
+    pushLog(SEARCH_TAB, 'Auto mode: no configured URLs to scan — skipping this cycle.')
+    return
+  }
   try {
-    if (step === 'urls') {
-      if (config.mustCheckUrls.length === 0) {
-        pushLog(SEARCH_TAB, 'Auto mode: no configured URLs to scan — skipping urls step.')
-        return
-      }
-      await runSearchUrls(config, config.mustCheckUrls)
-      return
-    }
-
-    if (step === 'describe') {
-      const text = config.requirements.trim()
-      if (!text) {
-        pushLog(SEARCH_TAB, 'Auto mode: no requirements text configured — skipping describe step.')
-        return
-      }
-      const urls = await generateSearchUrlsFromText(text)
-      if (urls.length === 0) {
-        pushLog(SEARCH_TAB, 'Auto mode: could not generate search URLs from requirements — skipping describe step.')
-        return
-      }
-      await runSearchUrls(config, urls)
-      return
-    }
-
-    // step === 'resume'
-    const urls = await generateSearchUrlsFromResume(config)
-    if (urls.length === 0) {
-      pushLog(SEARCH_TAB, 'Auto mode: could not generate search URLs from resume.md — skipping resume step.')
-      return
-    }
-    await runSearchUrls(config, urls)
+    await runSearchUrls(config.mustCheckUrls)
   } catch (err) {
-    pushLog(SEARCH_TAB, `Auto mode: ${step} step failed: ${err instanceof Error ? err.message : String(err)}`)
-    logger.error({ err, step }, 'auto mode: step failed')
+    pushLog(SEARCH_TAB, `Auto mode: cycle failed: ${err instanceof Error ? err.message : String(err)}`)
+    logger.error({ err }, 'auto mode: cycle failed')
   }
 }
 
 async function runLoop(): Promise<void> {
   while (state.mode === 'loop' && state.loopActive) {
-    const step = ROTATION_STEPS[state.stepIndex % ROTATION_STEPS.length]!
-    const work = runStep(step, getCurrentConfig())
+    const work = runConfiguredUrls()
     activeWorkPromise = work
     await work
-    state.stepIndex++
   }
 }
 
@@ -139,11 +99,7 @@ async function runIntervalTick(): Promise<void> {
   state.tickRunning = true
   const work = (async () => {
     try {
-      const config = getCurrentConfig()
-      for (const step of ROTATION_STEPS) {
-        if (state.mode !== 'interval') break
-        await runStep(step, config)
-      }
+      await runConfiguredUrls()
       if (state.mode === 'interval' && state.intervalMs !== null) {
         pushLog(SEARCH_TAB, `Auto mode: cycle finished — next tick in ~${formatDuration(state.intervalMs)}.`)
       }
@@ -172,8 +128,7 @@ export function startAutoMode(mode: AutoMode, intervalMs?: number): void {
   if (mode === 'loop') {
     state.mode = 'loop'
     state.loopActive = true
-    state.stepIndex = 0
-    pushLog(SEARCH_TAB, 'Auto mode: loop started (urls → describe → resume, continuous).')
+    pushLog(SEARCH_TAB, 'Auto mode: loop started (running configured search URLs continuously).')
     void runLoop()
     return
   }
@@ -194,7 +149,7 @@ export function stopAutoMode(): void {
     pushLog(SEARCH_TAB, 'Auto mode is not on.')
     return
   }
-  pushLog(SEARCH_TAB, 'Auto mode: stopping (any in-flight step will finish on its own).')
+  pushLog(SEARCH_TAB, 'Auto mode: stopping (any in-flight cycle will finish on its own).')
   if (state.intervalHandle) {
     clearInterval(state.intervalHandle)
     state.intervalHandle = null
@@ -216,14 +171,10 @@ function stopAutoModeSilently(): void {
 }
 
 /** For app shutdown. Order matters here: stop scheduling FIRST (so the loop/interval
- * driver never starts another step once the current one ends), then abort+wait for
+ * driver never starts another cycle once the current one ends), then abort+wait for
  * whatever runSearchUrls call is actually in flight via search-agent's own
  * stopSearchAndWait (shared AbortController — covers both manually-triggered and
- * scheduler-triggered runs), and only then await activeWorkPromise as a final catch-all
- * for the non-abortable URL-generation call (generateSearchUrlsFromText/FromResume use a
- * separate small Agent with no AbortSignal) a describe/resume step might currently be
- * in the middle of. Awaiting activeWorkPromise BEFORE aborting the search would risk
- * hanging shutdown indefinitely on a long-running scan. */
+ * scheduler-triggered runs), and only then await activeWorkPromise as a final catch-all. */
 export async function stopAutoModeAndWait(): Promise<void> {
   stopAutoModeSilently()
   await stopSearchAndWait()
