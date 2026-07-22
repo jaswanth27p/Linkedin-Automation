@@ -152,7 +152,7 @@ Free text — your resume, in Markdown or plain text. Used as LLM context for re
 
 ## Usage
 
-Once `/verify-login` succeeds, every command below is available. Commands are scoped to a tab — `Tab`/`Shift+Tab` cycles between Search / Easy Apply / External Apply, or jump directly with `/tab <name>`.
+Once `/verify-login` succeeds, every command below is available. Commands are scoped to a tab — `Tab`/`Shift+Tab` cycles between Search / Easy Apply / External Jobs / Career Pages, or jump directly with `/tab <name>`.
 
 | Command | Tab | What it does |
 |---|---|---|
