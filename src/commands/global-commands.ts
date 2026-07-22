@@ -128,7 +128,7 @@ export function registerGlobalCommands(): void {
         appState.activeTab,
         result.gmail
           ? 'Login verified: Gmail connected.'
-          : 'Not logged in yet (Gmail). Log in in tab 2 — only needed for OTPs/verification links on external apply sites.',
+          : 'Not logged in yet (Gmail). Optional and currently unused by any agent — logging in is not required.',
       )
     },
   })

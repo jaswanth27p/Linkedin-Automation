@@ -7,9 +7,9 @@ let ticking = false
 
 /**
  * Poll the bootstrap browser for LinkedIn (tab 0) and Gmail (tab 1) login every
- * `intervalMs`. Unlock still gates on LinkedIn only — Gmail is optional, used
- * later by the external-apply agent to read OTPs/verification links, so it
- * never blocks the app. Keeps polling until BOTH are connected (not just
+ * `intervalMs`. Unlock still gates on LinkedIn only — Gmail login is optional
+ * and currently vestigial (no agent reads it), so it never blocks the app.
+ * Keeps polling until BOTH are connected (not just
  * LinkedIn) — LinkedIn usually restores instantly from the saved cookie file,
  * while Gmail needs a fresh manual login every run, so stopping the timer the
  * moment LinkedIn succeeds would miss Gmail finishing seconds/minutes later.
