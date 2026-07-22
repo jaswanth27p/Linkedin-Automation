@@ -58,11 +58,12 @@ export function notify(event: NotifyEvent): void {
       if (err) logger.error({ err, event }, 'notify: node-notifier reported an error')
     })
     // Best-effort click-to-open: registers a one-shot listener per notification.
-    // node-notifier's 'click' event is global (not scoped per notify() call), so
-    // under rapid concurrent notifications a click could in principle open the
-    // wrong URL — acceptable here given external-job notifications are
-    // infrequent and one-at-a-time in practice.
-    if (built.openUrl) {
+    // node-notifier's 'click' event is global (not scoped per notify() call) and
+    // listeners stack — under multiple pending external-job notifications, one
+    // click fires every still-registered listener, opening all of their URLs at
+    // once, not just the clicked one. Acceptable here given external-job
+    // notifications are infrequent in practice.
+    if (built.openUrl && /^https?:\/\//i.test(built.openUrl)) {
       const url = built.openUrl
       notifier.once('click', () => {
         void open(url).catch((err) => logger.error({ err, url }, 'notify: failed to open URL'))
