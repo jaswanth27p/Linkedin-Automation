@@ -6,15 +6,16 @@ It does **not** store or ask for your LinkedIn password. You log in by hand, onc
 
 ## What it does
 
-- **Search** — runs LinkedIn job searches (from a config file, a plain-English description, or inferred from your resume), judges each result against your resume/profile/requirements, and queues the relevant ones.
+- **Search** — runs the LinkedIn search-result URLs you configure (`mustCheckUrls`), once or on a loop/interval. Every new job it finds gets recorded and routed: no relevance judgment against your resume/requirements for LinkedIn, since your search URL's own filters (keywords, location, date posted) are trusted as the relevance signal.
 - **Easy Apply** — works through LinkedIn's own "Easy Apply" queue, filling out the multi-step form for each job.
-- **External Apply** — works through jobs that apply on the company's own site, opening each in its own browser tab (including simple account-creation/email-verification flows), and asking you for the verification code when one is required.
+- **External jobs — saved, not automated** — a job that hands off to the company's own site is saved to the database with its apply link and you get a desktop notification. There's no automated apply flow for external sites: every company's apply form is different enough that scripted automation there breaks constantly, so this app doesn't attempt it.
+- **Career pages — separate, still judged** — company career pages you track with `/add-career-url` are scanned by a second agent that DOES judge relevance against your resume/profile/requirements (since, unlike LinkedIn, an arbitrary careers page has no equivalent of LinkedIn's own search filters). A relevant posting is saved and notified the same way an external LinkedIn job is — never auto-applied.
 - **Learns as it goes** — the first time it hits a question it can't answer on its own, it asks you once, then remembers the answer (`profile.json`) so it's never asked again.
-- **Never applies blind** — every job goes into a Postgres table with a status and (for applications) a screenshot, so you have a record of what was actually submitted.
+- **Never applies blind** — every Easy Apply application goes into a Postgres table with a status and a screenshot, so you have a record of what was actually submitted.
 
 ## How it works (short version)
 
-One Bun process runs everything: a terminal UI (three tabs — Search / Easy Apply / External Apply), a background browser it drives via [Playwright](https://playwright.dev/) over Chrome DevTools Protocol, and three [Mastra](https://mastra.ai/) AI agents (search, easy-apply, external-apply) that each get their own set of tools (navigate, click, type, plus a handful of app-specific ones) and figure out the actual steps themselves — they're not scripted click-sequences, so they adapt to whatever a given job posting or apply form actually looks like. Search results and application records live in Postgres; the queue between "found a relevant job" and "applied to it" is BullMQ/Redis.
+One Bun process runs everything: a terminal UI (four tabs — Search / Easy Apply / External Jobs / Career Pages), a background browser it drives via [Playwright](https://playwright.dev/) over Chrome DevTools Protocol, and three [Mastra](https://mastra.ai/) AI agents (LinkedIn search, career-page scan, easy-apply) that each get their own set of tools (navigate, click, type, plus a handful of app-specific ones) and figure out the actual steps themselves — they're not scripted click-sequences, so they adapt to whatever a given job posting or apply form actually looks like. Job/application records live in Postgres; the queue between "found an Easy Apply job" and "applied to it" is BullMQ/Redis. External jobs (from either agent) skip the queue entirely — they're saved with their apply link and you get a desktop notification instead.
 
 For the full technical design (and where the real implementation differs from the original plan), see [`docs/superpowers/specs/2026-07-14-tui-rebuild-design.md`](docs/superpowers/specs/2026-07-14-tui-rebuild-design.md). For codebase-level orientation, see [`CLAUDE.md`](CLAUDE.md).
 
@@ -100,13 +101,13 @@ For the full technical design (and where the real implementation differs from th
 
 ```ts
 export default {
-  mustCheckUrls: [                    // LinkedIn search-results URLs to run with /search-urls
+  mustCheckUrls: [                    // LinkedIn search-results URLs to run with /search-urls or auto mode.
     'https://www.linkedin.com/jobs/search/?f_TPR=r86400&keywords=software%20engineer',
   ],
-  requirements: `                     // Free text — what you're actually looking for.
-    Look for senior backend / full-stack engineering roles.
-    Prefer remote or hybrid in the US.
-    Avoid roles requiring more than 8 years of experience.
+  requirements: `                     // Free text — used ONLY by the career-page scan agent
+    Look for senior backend / full-stack engineering roles.  // (/add-career-url + /check-careers). LinkedIn search
+    Prefer remote or hybrid in the US.                        // no longer judges relevance — mustCheckUrls' own
+    Avoid roles requiring more than 8 years of experience.    // LinkedIn filters are trusted for that.
   `,
   concurrency: 1,                     // Reserved for future use; queue workers currently always run at concurrency 1.
   profileFiles: {
@@ -115,7 +116,6 @@ export default {
   },
   model: 'opencode-go/deepseek-v4-flash',  // 'provider/model' — see Model notes below.
   search: {
-    irrelevantBailRatio: 0.5,         // Bail out of a search results page once this fraction of scanned jobs are irrelevant.
     maxJobsPerRun: 25,                // Cap on job detail opens per search run (LinkedIn rate-limit guard).
     minNavDelayMs: 3000,              // Randomized human-like pause after each browser navigation…
     maxNavDelayMs: 8000,              // …between these two bounds.
@@ -123,7 +123,7 @@ export default {
 }
 ```
 
-`model` and every `search.*` number can also be changed at runtime without restarting, via `/set model <name>`, `/set irrelevantBailRatio <0-1>`, `/set maxJobsPerRun <n>`, etc.
+`model` and every `search.*` number can also be changed at runtime without restarting, via `/set model <name>`, `/set maxJobsPerRun <n>`, etc.
 
 ### `profile.json`
 
@@ -159,24 +159,22 @@ Once `/verify-login` succeeds, every command below is available. Commands are sc
 | `/verify-login` | global | Check LinkedIn/Gmail login status; unlocks the app once LinkedIn passes |
 | `/tab [search\|easy\|external\|careers]` | global | Switch the active tab (no arg opens a picker) |
 | `/theme [name]` | global | Switch color theme (no arg opens a picker) |
-| `/set <setting> <value>` | global | Change a runtime setting (`concurrency`, `model`, `irrelevantBailRatio`, `maxJobsPerRun`, `minNavDelayMs`, `maxNavDelayMs`) without restarting |
+| `/set <setting> <value>` | global | Change a runtime setting (`concurrency`, `model`, `maxJobsPerRun`, `minNavDelayMs`, `maxNavDelayMs`) without restarting |
 | `/help` | global | List commands available on the current tab |
 | `/exit` | global | Close the browser and quit (`Ctrl+Q` also works) |
 | `/search-urls` | search | Run the URLs from `linkedin-auto.config.ts`'s `mustCheckUrls` |
-| `/search-describe [free text]` | search | Turn a plain-English description (default: config requirements) into search URLs, then run them |
-| `/search-resume` | search | Infer search filters from `resume.md`, then run them |
 | `/stop-search` | search | Stop an in-progress search run |
-| `/auto-on loop` / `/auto-on interval <1h30m>` | search | Rotate urls→describe→resume automatically and start both apply workers |
-| `/auto-off` | search | Stop the auto-mode rotation |
+| `/auto-on loop` / `/auto-on interval <1h30m>` | search | Repeatedly run `mustCheckUrls` and keep the Easy Apply worker started |
+| `/auto-off` | search | Stop the auto-mode loop/interval |
 | `/process-easy-queue` | easy | Start working through queued Easy Apply jobs |
 | `/stop-easy-queue` | easy | Stop the Easy Apply worker |
-| `/process-external-queue` | external | Start working through queued external-apply jobs |
-| `/stop-external-queue` | external | Stop the external-apply worker |
 | `/add-career-url <url> [label]` | careers | Track an external company careers page |
-| `/check-careers` | careers | Re-scan every tracked career page for new relevant postings |
+| `/check-careers` | careers | Re-scan every tracked career page for new relevant postings (still resume/requirements-judged) |
 | `/stop-careers` | careers | Stop an in-progress career-page check |
 
-A small review dashboard also runs at `http://127.0.0.1:4870` (loopback only; port via `DASHBOARD_PORT`) — today's stats, application history, and a review page where you can mark recorded answers correct/wrong (corrections feed back into `profile.json`).
+**External jobs (from LinkedIn or a career page)** are never auto-applied — they're saved to the database with their apply link, and you get a desktop notification (title, company, and the link). Check them anytime at `http://127.0.0.1:4870/external-jobs`, or in the External Jobs tab in the TUI.
+
+A small review dashboard also runs at `http://127.0.0.1:4870` (loopback only; port via `DASHBOARD_PORT`) — today's stats, Easy Apply application history, external jobs found, and a review page where you can mark recorded answers correct/wrong (corrections feed back into `profile.json`).
 
 **When an agent needs your input** — an application question it can't answer, an email verification code, a stuck checkpoint — the input box automatically switches from command mode to plain-text answer mode (the sidebar highlights which tab is waiting, and shows the question). Just type your answer and press Enter; the agent resumes with it.
 
