@@ -346,7 +346,7 @@ export async function runCareerCheck(): Promise<void> {
 
         pushLog(
           CAREERS_TAB,
-          `Finished ${page.label}: reviewed ${ctx.scanned} posting(s), ${ctx.relevant} added to the queue, ${ctx.skipped} skipped.`,
+          `Finished ${page.label}: reviewed ${ctx.scanned} posting(s), ${ctx.relevant} saved and notified, ${ctx.skipped} skipped.`,
         )
 
         if (abort.signal.aborted) break
