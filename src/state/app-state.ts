@@ -7,26 +7,27 @@ function emptyTabState() {
 
 function initialState(settings: Settings): AppState {
   return {
-    session: { linkedin: false },
+    session: { linkedin: false, gmail: false },
     activeTab: 'search',
     tabs: {
       search: emptyTabState(),
       easy: emptyTabState(),
       external: emptyTabState(),
+      careers: emptyTabState(),
     },
     settings,
   }
 }
 
 export let [appState, setAppStateInternal] = createStore<AppState>(
-  initialState({ concurrency: 1, model: '', irrelevantBailRatio: 0.5 }),
+  initialState({ concurrency: 1, model: '', maxJobsPerRun: 25, minNavDelayMs: 3000, maxNavDelayMs: 8000 }),
 )
 
 export function initAppState(settings: Settings): void {
   ;[appState, setAppStateInternal] = createStore<AppState>(initialState(settings))
 }
 
-export function setSessionStatus(service: 'linkedin', connected: boolean): void {
+export function setSessionStatus(service: 'linkedin' | 'gmail', connected: boolean): void {
   setAppStateInternal('session', service, connected)
 }
 

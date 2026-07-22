@@ -1,0 +1,45 @@
+import { createSignal, Show } from 'solid-js'
+import { theme } from '../theme/current.ts'
+
+const [message, setMessage] = createSignal<string | null>(null)
+let timer: ReturnType<typeof setTimeout> | null = null
+
+/** Show a transient toast (e.g. "Copied to clipboard") that auto-dismisses. */
+export function showToast(text: string, durationMs = 1800): void {
+  setMessage(text)
+  if (timer) clearTimeout(timer)
+  timer = setTimeout(() => {
+    setMessage(null)
+    timer = null
+  }, durationMs)
+}
+
+function dismissToast(): void {
+  if (timer) {
+    clearTimeout(timer)
+    timer = null
+  }
+  setMessage(null)
+}
+
+/** Absolute-positioned overlay pinned to the top-right; render once at the app root. */
+export function ToastOverlay() {
+  return (
+    <Show when={message()}>
+      <box
+        position="absolute"
+        top={1}
+        right={2}
+        zIndex={3000}
+        border
+        borderColor={theme().accent}
+        backgroundColor={theme().backgroundMenu}
+        paddingLeft={1}
+        paddingRight={1}
+        onMouseDown={dismissToast}
+      >
+        <text fg={theme().accent}>✓ {message()}</text>
+      </box>
+    </Show>
+  )
+}

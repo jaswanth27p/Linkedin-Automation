@@ -4,16 +4,15 @@ import { initAppState, setActiveTab, setSessionStatus, pushLog, appState } from 
 import { App } from '../../../src/tui/App.tsx'
 
 beforeEach(() => {
-  initAppState({ concurrency: 1, model: 'test', irrelevantBailRatio: 0.5 })
+  initAppState({ concurrency: 1, model: 'test', maxJobsPerRun: 25, minNavDelayMs: 3000, maxNavDelayMs: 8000 })
 })
 
 describe('App', () => {
-  test('renders header, sidebar, and the active tab\'s log panel', async () => {
+  test('renders sidebar and the active tab\'s log panel', async () => {
     pushLog('search', 'scan started')
     const setup = await testRender(() => <App />, { width: 100, height: 30 })
     await setup.renderOnce()
     const frame = setup.captureCharFrame()
-    expect(frame).toContain('LinkedIn Auto-Apply')
     expect(frame).toContain('Agents')
     expect(frame).toContain('scan started')
   })
@@ -51,7 +50,7 @@ describe('App', () => {
     expect(setup.captureCharFrame()).toContain('Type / for commands')
   })
 
-  test('pressing Tab cycles activeTab search -> easy -> external -> search', async () => {
+  test('pressing Tab cycles activeTab search -> easy -> external -> careers -> search', async () => {
     const setup = await testRender(() => <App />, { width: 100, height: 30 })
     await setup.renderOnce()
     expect(appState.activeTab).toBe('search')
@@ -66,6 +65,10 @@ describe('App', () => {
 
     setup.mockInput.pressTab()
     await setup.renderOnce()
+    expect(appState.activeTab).toBe('careers')
+
+    setup.mockInput.pressTab()
+    await setup.renderOnce()
     expect(appState.activeTab).toBe('search')
   })
 
@@ -74,7 +77,7 @@ describe('App', () => {
     await setup.renderOnce()
     setup.mockInput.pressTab({ shift: true })
     await setup.renderOnce()
-    expect(appState.activeTab).toBe('external')
+    expect(appState.activeTab).toBe('careers')
   })
 
   test('narrow resize wraps sidebar text instead of clipping it', async () => {

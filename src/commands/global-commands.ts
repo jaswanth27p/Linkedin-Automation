@@ -4,6 +4,11 @@ import { appState, setSessionStatus, setActiveTab, setSetting, pushLog, TAB_IDS 
 import type { TabId, Settings } from '../state/types.ts'
 import { getBrowserServerPort } from '../browser/session.ts'
 import { verifyLogin } from '../browser/verify-login.ts'
+import { openTabPicker } from '../tui/components/TabPicker.tsx'
+import { openThemePicker } from '../tui/components/ThemePicker.tsx'
+import { setTheme } from '../tui/theme/current.ts'
+import { hasTheme } from '../tui/theme/index.ts'
+import { persistThemeName } from '../tui/theme/persist.ts'
 
 export function registerGlobalCommands(): void {
   registerCommand({
@@ -19,10 +24,15 @@ export function registerGlobalCommands(): void {
   registerCommand({
     name: 'tab',
     scope: 'global',
-    description: '/tab search|easy|external — switch active tab',
+    description: '/tab [search|easy|external|careers] — switch tab (no arg opens a picker)',
     run: (ctx) => {
       const target = ctx.args[0] as TabId | undefined
-      if (!target || !TAB_IDS.includes(target)) {
+      // No argument → open the centered picker dialog.
+      if (!target) {
+        openTabPicker()
+        return
+      }
+      if (!TAB_IDS.includes(target)) {
         pushLog(appState.activeTab, `Usage: /tab ${TAB_IDS.join('|')}`)
         return
       }
@@ -31,17 +41,68 @@ export function registerGlobalCommands(): void {
   })
 
   registerCommand({
+    name: 'theme',
+    scope: 'global',
+    description: '/theme [name] — switch color theme (no arg opens a picker)',
+    run: (ctx) => {
+      const target = ctx.args[0]
+      if (!target) {
+        openThemePicker()
+        return
+      }
+      if (!hasTheme(target)) {
+        pushLog(appState.activeTab, `Unknown theme: ${target}. Run /theme with no args to browse.`)
+        return
+      }
+      setTheme(target)
+      persistThemeName(target)
+      pushLog(appState.activeTab, `Theme changed to: ${target}`)
+    },
+  })
+
+  registerCommand({
     name: 'set',
     scope: 'global',
-    description: '/set <concurrency|model|irrelevantBailRatio> <value>',
+    description: '/set <concurrency|model|maxJobsPerRun|minNavDelayMs|maxNavDelayMs> <value>',
     run: (ctx) => {
       const [key, ...rest] = ctx.args
       const value = rest.join(' ')
-      if (key === 'concurrency') setSetting('concurrency', Number(value))
-      else if (key === 'model') setSetting('model', value)
-      else if (key === 'irrelevantBailRatio') setSetting('irrelevantBailRatio', Number(value))
-      else {
-        pushLog(appState.activeTab, `Unknown setting: ${key}. Use concurrency, model, or irrelevantBailRatio.`)
+
+      // Every numeric setting is validated here — an unchecked Number() let
+      // `/set concurrency abc` poison the live settings with NaN.
+      const numericRules: Partial<Record<keyof Settings, { min: number; integer: boolean; max?: number }>> = {
+        concurrency: { min: 1, integer: true },
+        maxJobsPerRun: { min: 1, integer: true },
+        minNavDelayMs: { min: 0, integer: true },
+        maxNavDelayMs: { min: 0, integer: true },
+      }
+
+      if (key === 'model') {
+        if (!value.trim()) {
+          pushLog(appState.activeTab, 'Usage: /set model <model-id>')
+          return
+        }
+        setSetting('model', value.trim())
+      } else if (key && key in numericRules) {
+        const rule = numericRules[key as keyof Settings]!
+        const num = Number(value)
+        if (
+          !value.trim() ||
+          !Number.isFinite(num) ||
+          num < rule.min ||
+          (rule.max !== undefined && num > rule.max) ||
+          (rule.integer && !Number.isInteger(num))
+        ) {
+          const range = rule.max !== undefined ? `${rule.min}-${rule.max}` : `>= ${rule.min}`
+          pushLog(appState.activeTab, `Invalid value for ${key}: "${value}". Expected ${rule.integer ? 'an integer' : 'a number'} ${range}.`)
+          return
+        }
+        setSetting(key as 'concurrency', num)
+      } else {
+        pushLog(
+          appState.activeTab,
+          `Unknown setting: ${key}. Use concurrency, model, maxJobsPerRun, minNavDelayMs, or maxNavDelayMs.`,
+        )
         return
       }
       pushLog(appState.activeTab, `Set ${key} = ${value}`)
@@ -51,16 +112,24 @@ export function registerGlobalCommands(): void {
   registerCommand({
     name: 'verify-login',
     scope: 'global',
-    description: 'Check LinkedIn login status in the bootstrap browser',
+    description: 'Check LinkedIn and Gmail login status in the bootstrap browser',
     run: async () => {
       const port = getBrowserServerPort()
       const result = await verifyLogin(port)
       setSessionStatus('linkedin', result.linkedin)
-      if (result.linkedin) {
-        pushLog(appState.activeTab, 'Login verified: LinkedIn connected.')
-      } else {
-        pushLog(appState.activeTab, 'Not logged in yet. Log in in the browser window, then run /verify-login again.')
-      }
+      setSessionStatus('gmail', result.gmail)
+      pushLog(
+        appState.activeTab,
+        result.linkedin
+          ? 'Login verified: LinkedIn connected.'
+          : 'Not logged in yet (LinkedIn). Log in in tab 1, then run /verify-login again.',
+      )
+      pushLog(
+        appState.activeTab,
+        result.gmail
+          ? 'Login verified: Gmail connected.'
+          : 'Not logged in yet (Gmail). Optional and currently unused by any agent — logging in is not required.',
+      )
     },
   })
 
@@ -70,8 +139,10 @@ export function registerGlobalCommands(): void {
     description: 'Close the browser and exit the application',
     run: async () => {
       pushLog(appState.activeTab, 'Shutting down...')
-      const { shutdownBrowserServer } = await import('../browser/session.ts')
-      await shutdownBrowserServer()
+      // Only destroy the TUI here — main()'s cleanup() (awaiting mountTui())
+      // then stops the search agent, both queue workers, and the browser in
+      // the correct order. Shutting the browser down here directly used to
+      // race with cleanup() doing the same thing out of order.
       const { destroyTui } = await import('../tui/index.tsx')
       destroyTui()
     },
