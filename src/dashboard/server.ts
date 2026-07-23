@@ -7,6 +7,8 @@ import { getCurrentConfig } from '../config/current.ts'
 import { saveLearnedAnswer } from '../profile/loader.ts'
 import { groupAnswersByQuestion, type ApplicationAnswers } from './review-data.ts'
 import { logger } from '../utils/logger.ts'
+import { filterUnreviewed, clusterQuestions, type ReviewedPair, type QuestionCluster } from './review-cluster.ts'
+import { appState } from '../state/app-state.ts'
 
 function startOfToday(): Date {
   const d = new Date()
@@ -253,7 +255,12 @@ async function renderCareerPages(): Promise<Response> {
   )
 }
 
-async function renderReview(): Promise<Response> {
+async function loadReviewedPairs(): Promise<ReviewedPair[]> {
+  const db = getDb()
+  return db.select({ question: answerReviews.question, answer: answerReviews.answer }).from(answerReviews)
+}
+
+async function loadUnreviewedGroups() {
   const db = getDb()
   const rows = await db
     .select({ jobId: applications.jobId, answers: applications.answers, jobTitle: jobs.title, company: jobs.company })
@@ -261,8 +268,12 @@ async function renderReview(): Promise<Response> {
     .innerJoin(jobs, eq(applications.jobId, jobs.id))
 
   const grouped = groupAnswersByQuestion(rows as ApplicationAnswers[])
+  const reviewed = await loadReviewedPairs()
+  return filterUnreviewed(grouped, reviewed)
+}
 
-  const items = grouped
+function renderUnreviewedList(groups: Awaited<ReturnType<typeof loadUnreviewedGroups>>): string {
+  return groups
     .map(
       (g) => `
     <fieldset>
@@ -285,8 +296,122 @@ async function renderReview(): Promise<Response> {
     </fieldset>`,
     )
     .join('')
+}
 
-  return page(`<h1>Review</h1>${items || '<p>No answers recorded yet.</p>'}`)
+function renderClusters(clusters: QuestionCluster[], groups: Awaited<ReturnType<typeof loadUnreviewedGroups>>): string {
+  const groupByQuestion = new Map(groups.map((g) => [g.question, g]))
+
+  return clusters
+    .map((cluster, i) => {
+      const members = cluster.memberQuestions
+        .map((q) => groupByQuestion.get(q))
+        .filter((g): g is NonNullable<typeof g> => g !== undefined)
+
+      const pairsJson = escapeHtml(
+        JSON.stringify(members.flatMap((g) => g.variants.map((v) => ({ question: g.question, answer: v.answer })))),
+      )
+
+      const referenceHtml = members
+        .map(
+          (g) => `
+        <div class="reference-block">
+          <strong>${escapeHtml(g.question)}</strong>
+          ${g.variants.map((v) => `<div>&rarr; ${escapeHtml(v.answer)} <small>(${v.jobs.length} application(s))</small></div>`).join('')}
+        </div>`,
+        )
+        .join('')
+
+      return `
+    <section>
+      <h2>${escapeHtml(cluster.canonicalQuestion)}</h2>
+      ${referenceHtml}
+      <form method="post" action="/review/cluster-feedback">
+        <input type="hidden" name="members" value="${pairsJson}" />
+        <button name="verdict" value="correct">All correct</button>
+        <input type="text" name="note" placeholder="corrected answer to use for all of these (if wrong)" />
+        <button name="verdict" value="wrong">Wrong</button>
+      </form>
+    </section>`
+    })
+    .join('')
+}
+
+async function renderReview(errorMessage?: string, clusters?: QuestionCluster[]): Promise<Response> {
+  const groups = await loadUnreviewedGroups()
+
+  const errorHtml = errorMessage ? `<div class="error-banner">${escapeHtml(errorMessage)}</div>` : ''
+  const generateForm = `<form method="post" action="/review/generate"><button type="submit">Generate unique questions</button></form>`
+  const clustersHtml = clusters ? `<h1>Clustered questions</h1>${renderClusters(clusters, groups)}` : ''
+  const listHtml = `<h1>Unreviewed</h1>${generateForm}${renderUnreviewedList(groups) || '<p>No unreviewed answers.</p>'}`
+
+  return page(`${errorHtml}${clustersHtml}${clustersHtml ? '<hr />' : ''}${listHtml}`)
+}
+
+async function handleGenerate(): Promise<Response> {
+  const groups = await loadUnreviewedGroups()
+  const questions = groups.map((g) => g.question)
+
+  try {
+    const clusters = await clusterQuestions(questions, appState.settings.model)
+    return renderReview(undefined, clusters)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    logger.error({ err }, 'dashboard: question clustering failed')
+    return renderReview(`Failed to generate unique questions: ${message}`)
+  }
+}
+
+interface ClusterFeedbackPair {
+  question: string
+  answer: string
+}
+
+function isClusterFeedbackPair(v: unknown): v is ClusterFeedbackPair {
+  return typeof v === 'object' && v !== null && typeof (v as any).question === 'string' && typeof (v as any).answer === 'string'
+}
+
+async function handleClusterFeedback(req: Request): Promise<Response> {
+  const form = await req.formData()
+  const membersRaw = String(form.get('members') ?? '')
+  const verdictRaw = String(form.get('verdict') ?? '')
+  const note = form.get('note') ? String(form.get('note')) : undefined
+
+  if (verdictRaw !== 'correct' && verdictRaw !== 'wrong') {
+    return new Response('bad request', { status: 400 })
+  }
+  // Re-bind to an explicitly-typed literal union: TS's overload resolution for
+  // drizzle's `.values()` widens a CFA-narrowed `string` back to `string` when
+  // it's read inside a fresh object literal built by `.map()` below (no
+  // contextual type flows into the callback for an overloaded generic call).
+  // An explicit type annotation on a fresh binding sidesteps that widening.
+  const verdict: 'correct' | 'wrong' = verdictRaw
+
+  let members: ClusterFeedbackPair[]
+  try {
+    const parsed: unknown = JSON.parse(membersRaw)
+    if (!Array.isArray(parsed) || !parsed.every(isClusterFeedbackPair) || parsed.length === 0) {
+      throw new Error('empty or malformed members list')
+    }
+    members = parsed
+  } catch {
+    return new Response('bad request', { status: 400 })
+  }
+
+  const db = getDb()
+  await db
+    .insert(answerReviews)
+    .values(members.map((m) => ({ id: randomUUID(), question: m.question, answer: m.answer, verdict, note: note ?? null })))
+
+  if (verdict === 'wrong' && note) {
+    const config = getCurrentConfig()
+    const distinctQuestions = [...new Set(members.map((m) => m.question))]
+    for (const question of distinctQuestions) {
+      await saveLearnedAnswer(config.profileFiles.profile, question, note)
+    }
+    logger.info({ questions: distinctQuestions, note }, 'dashboard: corrected learned answer (cluster)')
+  }
+
+  return new Response(null, { status: 303, headers: { Location: '/review' } })
 }
 
 async function handleFeedback(req: Request): Promise<Response> {
@@ -318,6 +443,8 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (req.method === 'GET' && url.pathname === '/applications') return renderApplications()
   if (req.method === 'GET' && url.pathname === '/external-jobs') return renderExternalJobs()
   if (req.method === 'GET' && url.pathname === '/review') return renderReview()
+  if (req.method === 'POST' && url.pathname === '/review/generate') return handleGenerate()
+  if (req.method === 'POST' && url.pathname === '/review/cluster-feedback') return handleClusterFeedback(req)
   if (req.method === 'GET' && url.pathname === '/career-pages') return renderCareerPages()
   if (req.method === 'POST' && url.pathname === '/review/feedback') return handleFeedback(req)
   return new Response('not found', { status: 404 })
