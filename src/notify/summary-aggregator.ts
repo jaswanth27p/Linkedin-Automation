@@ -31,6 +31,7 @@ export function flush(): void {
 }
 
 export function startSummaryScheduler(intervalMs: number): void {
+  stopSummaryScheduler()
   intervalMinutes = Math.round(intervalMs / 60_000)
   timer = setInterval(flush, intervalMs)
 }
