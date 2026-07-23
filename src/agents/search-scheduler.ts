@@ -1,9 +1,24 @@
 import { getCurrentConfig } from '../config/current.ts'
-import { pushLog } from '../state/app-state.ts'
+import { appState, pushLog } from '../state/app-state.ts'
 import { runSearchUrls, isSearchRunning, stopSearchAndWait } from './search-agent.ts'
 import { startEasyApplyWorker } from '../queues/easy-apply-worker.ts'
 import { logger } from '../utils/logger.ts'
 import type { TabId } from '../state/types.ts'
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (ms <= 0 || signal.aborted) return Promise.resolve()
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      resolve()
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
 
 const SEARCH_TAB: TabId = 'search'
 
@@ -61,6 +76,10 @@ const state: SchedulerState = {
  * stopAutoModeAndWait can await it on shutdown without caring which mode was active. */
 let activeWorkPromise: Promise<void> | null = null
 
+/** Aborts the between-cycle cooldown sleep in loop mode so /auto-off (and
+ * shutdown) doesn't have to wait out the full loopCooldownMs to take effect. */
+let loopCooldownAbort: AbortController | null = null
+
 export function isAutoModeOn(): boolean {
   return state.mode !== null
 }
@@ -88,6 +107,17 @@ async function runLoop(): Promise<void> {
     const work = runConfiguredUrls()
     activeWorkPromise = work
     await work
+
+    if (state.mode !== 'loop' || !state.loopActive) break
+
+    // Cooldown between full cycles — without this, loop mode reopens the same
+    // search URLs back-to-back nonstop, which reads as bot behavior to
+    // LinkedIn (real rate-limit/ban risk). Abortable so /auto-off is instant.
+    const cooldownMs = Math.max(60_000, appState.settings.loopCooldownMs)
+    pushLog(SEARCH_TAB, `Auto mode: cycle finished — next loop cycle in ~${formatDuration(cooldownMs)}.`)
+    loopCooldownAbort = new AbortController()
+    await sleep(cooldownMs, loopCooldownAbort.signal)
+    loopCooldownAbort = null
   }
 }
 
@@ -157,6 +187,7 @@ export function stopAutoMode(): void {
   state.loopActive = false
   state.mode = null
   state.intervalMs = null
+  loopCooldownAbort?.abort()
 }
 
 /** Silent variant for app shutdown — no user-facing log, just tears the scheduler down. */
@@ -168,6 +199,7 @@ function stopAutoModeSilently(): void {
   state.loopActive = false
   state.mode = null
   state.intervalMs = null
+  loopCooldownAbort?.abort()
 }
 
 /** For app shutdown. Order matters here: stop scheduling FIRST (so the loop/interval

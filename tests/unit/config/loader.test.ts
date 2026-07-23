@@ -24,10 +24,4 @@ describe('loadConfig', () => {
       ),
     ).rejects.toThrow()
   })
-
-  test('accepts an optional resumeFile path', async () => {
-    const config = await loadConfig('./linkedin-auto.config.ts')
-    // Not set in the tracked sample config — must not be required.
-    expect(config.profileFiles.resumeFile).toBeUndefined()
-  })
 })

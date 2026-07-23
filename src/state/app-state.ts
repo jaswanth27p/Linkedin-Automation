@@ -20,7 +20,7 @@ function initialState(settings: Settings): AppState {
 }
 
 export let [appState, setAppStateInternal] = createStore<AppState>(
-  initialState({ concurrency: 1, model: '', maxJobsPerRun: 25, minNavDelayMs: 3000, maxNavDelayMs: 8000 }),
+  initialState({ concurrency: 1, model: '', maxJobsPerRun: 25, minNavDelayMs: 3000, maxNavDelayMs: 8000, loopCooldownMs: 300_000 }),
 )
 
 export function initAppState(settings: Settings): void {

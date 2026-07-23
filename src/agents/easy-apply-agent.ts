@@ -5,9 +5,8 @@ import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { Agent } from '@mastra/core/agent'
 import { createTool } from '@mastra/core/tools'
-import type { AgentBrowser } from '@mastra/agent-browser'
+import { AgentBrowser } from '@mastra/agent-browser'
 import { getSharedCdpUrl } from '../browser/session.ts'
-import { ApplyBrowser } from './browser/apply-browser.ts'
 import { getCurrentConfig } from '../config/current.ts'
 import { getDb } from '../db/index.ts'
 import { jobs, applications, type RecordedAnswer, type AnswerSource } from '../db/schema.ts'
@@ -23,11 +22,11 @@ import type { TabId } from '../state/types.ts'
 const EASY_TAB: TabId = 'easy'
 const SCREENSHOT_DIR = './data/screenshots'
 
-let sharedBrowser: ApplyBrowser | null = null
+let sharedBrowser: AgentBrowser | null = null
 
-function getEasyApplyBrowser(): ApplyBrowser {
+function getEasyApplyBrowser(): AgentBrowser {
   if (!sharedBrowser) {
-    sharedBrowser = new ApplyBrowser({
+    sharedBrowser = new AgentBrowser({
       cdpUrl: getSharedCdpUrl(),
       scope: 'shared',
       headless: false,
@@ -98,21 +97,6 @@ export function createRecordAnswerTool(ctx: SubmissionContext) {
     execute: async ({ question, answer, source }) => {
       ctx.answers.push({ question, answer, source: source as AnswerSource })
       return { ok: true }
-    },
-  })
-}
-
-function createUploadResumeTool(config: AppConfig, browser: ApplyBrowser) {
-  return createTool({
-    id: 'upload-resume',
-    description:
-      "Upload the candidate's resume file to a file-input field on the current page (e.g. an Easy Apply 'Attach resume' step). Only call this when the form actually shows a file upload control. If it returns ok: false, there was no plain file input to use (e.g. a Google-Drive-only widget) — fall back to asking the human to attach it manually via ask-human-and-remember, then continue once they confirm.",
-    inputSchema: z.object({}),
-    outputSchema: z.object({ ok: z.boolean(), error: z.string().optional() }),
-    execute: async () => {
-      const resumeFile = config.profileFiles.resumeFile
-      if (!resumeFile) return { ok: false, error: 'no resumeFile configured in linkedin-auto.config.ts' }
-      return browser.uploadFile(resumeFile, 'resume')
     },
   })
 }
@@ -199,7 +183,7 @@ Steps:
    c. Otherwise, if you can confidently infer the answer from the resume/profile content, answer it yourself.
    d. Otherwise — a genuine unknown — call ask-human-and-remember with the question, then use the returned answer.
    e. Regardless of which path (a-d) you used, call record-answer with the question, the answer you used, and which path resolved it (source: "profile", "learned", "inferred", or "human"). This is mandatory for EVERY field — it is the only record of what was actually submitted, for later human review. Do this before moving to the next field.
-3. If the form has a resume/CV upload step, call upload-resume. If it reports ok: false (no file input found — e.g. a Google-Drive-only widget), call ask-human-and-remember asking the human to attach the resume manually in the visible browser, then continue once they confirm.
+3. If the form has a resume step, LinkedIn Easy Apply reuses a resume already uploaded to the candidate's LinkedIn account — it will be pre-selected automatically. Just confirm/continue past that step; do not try to upload a file. Only if the step shows no resume at all and forces a fresh upload with no way to proceed, call ask-human-and-remember asking the human to attach one manually in the visible browser, then continue once they confirm.
 4. Submit the application once all steps are complete.
 5. Call report-submission with success: true after a successful submission, or success: false with a short error if you get stuck in a way you cannot resolve (broken page, unexpected error, application form crashed). Call it exactly once, at the very end.
 `.trim()
@@ -239,7 +223,6 @@ export async function processEasyApplyJob(jobId: string): Promise<void> {
         lookupLearnedAnswer: createLookupLearnedAnswerTool(config),
         askHumanAndRemember: createAskHumanAndRememberTool(config),
         recordAnswer: createRecordAnswerTool(ctx),
-        uploadResume: createUploadResumeTool(config, browser),
         reportSubmission: createReportSubmissionTool(jobRecord, browser, ctx),
       },
     })

@@ -6,8 +6,23 @@ export function normalize(text: string): string {
     .trim()
 }
 
+// Words common enough to dominate token overlap between genuinely different
+// questions (e.g. "Are you willing to relocate?" vs "...to travel?" share
+// every word except the one that actually matters) — stripped before fuzzy
+// scoring so the score reflects content words, not sentence scaffolding.
+const STOPWORDS = new Set([
+  'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'do', 'does', 'did', 'have', 'has', 'had',
+  'you', 'your', 'yours', 'i', 'my', 'me', 'we', 'our', 'it', 'its',
+  'what', 'which', 'who', 'whom', 'this', 'that', 'these', 'those',
+  'to', 'of', 'in', 'on', 'at', 'for', 'with', 'about', 'as', 'by',
+  'and', 'or', 'if', 'so', 'not', 'no', 'yes',
+  'will', 'would', 'can', 'could', 'should', 'shall', 'may', 'might', 'must',
+  'please', 'kindly',
+])
+
 function tokenSet(text: string): Set<string> {
-  return new Set(normalize(text).split(' ').filter(Boolean))
+  return new Set(normalize(text).split(' ').filter((t) => t && !STOPWORDS.has(t)))
 }
 
 function jaccardSimilarity(a: Set<string>, b: Set<string>): number {

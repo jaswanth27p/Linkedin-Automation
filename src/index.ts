@@ -104,6 +104,7 @@ async function main() {
     maxJobsPerRun: config.search.maxJobsPerRun,
     minNavDelayMs: config.search.minNavDelayMs,
     maxNavDelayMs: config.search.maxNavDelayMs,
+    loopCooldownMs: config.search.loopCooldownMs,
   })
 
   registerBuiltinCommands()

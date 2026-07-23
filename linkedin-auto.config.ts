@@ -2,7 +2,12 @@ import type { AppConfig } from './src/config/schema.ts'
 
 export default {
   mustCheckUrls: [
-    "https://www.linkedin.com/jobs/search-results/?keywords=full%20stack%20developer",
+    "https://www.linkedin.com/jobs/search-results/? keywords=entry-level%20typescript%20javascript%20node%20express%20react%20next.js%20nest.js%20posted%20in%20the%20past%2024%20hours&origin=JOB_SEARCH_PAGE_LOCATION_AUTOCOMPLETE&geoId=105556991",
+    "https://www.linkedin.com/jobs/search-results/?keywords=entry-level software enginner developer full stack posted in the past 24 hours&origin=JOB_SEARCH_PAGE_LOCATION_AUTOCOMPLETE&geoId=105556991",
+    "https://www.linkedin.com/jobs/search-results/? keywords=entry-level%20typescript%20javascript%20node%20express%20react%20next.js%20nest.js%20posted%20in%20the%20past%2024%20hours&origin=JOB_SEARCH_PAGE_LOCATION_AUTOCOMPLETE&geoId=105214831",
+    "https://www.linkedin.com/jobs/search-results/?keywords=entry-level software enginner developer full stack posted in the past 24 hours&origin=JOB_SEARCH_PAGE_LOCATION_AUTOCOMPLETE&geoId=105214831",
+    "https://www.linkedin.com/jobs/search-results/? keywords=entry-level%20typescript%20javascript%20node%20express%20react%20next.js%20nest.js%20posted%20in%20the%20past%2024%20hours%20remote&origin=JOB_SEARCH_PAGE_LOCATION_AUTOCOMPLETE&geoId=102713980",
+    "https://www.linkedin.com/jobs/search-results/?keywords=entry-level software enginner developer full stack posted in the past 24 hours remote&origin=JOB_SEARCH_PAGE_LOCATION_AUTOCOMPLETE&geoId=102713980",
   ],
   requirements: `
     Look for senior full-stack engineering and developer roles.
@@ -13,9 +18,6 @@ export default {
   profileFiles: {
     resume: "./resume.md",
     profile: "./profile.json",
-    // Absolute path to your résumé file for upload-resume to attach on apply
-    // forms, e.g. "C:/Users/you/Documents/resume.pdf". Optional.
-    // resumeFile: "",
   },
   model: "opencode-go/deepseek-v4-pro",
   search: {
@@ -25,5 +27,6 @@ export default {
     maxJobsPerRun: 50,
     minNavDelayMs: 3000,
     maxNavDelayMs: 8000,
+    loopCooldownMs: 300000,
   },
 } satisfies AppConfig;
