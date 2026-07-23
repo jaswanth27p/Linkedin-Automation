@@ -9,6 +9,7 @@ export const appConfigSchema = z.object({
   requirements: z.string().min(1),
   concurrency: z.number().positive().default(1),
   model: z.string().default('opencode-go/deepseek-v4-flash'),
+  notifySummaryIntervalMinutes: z.number().int().positive().default(30),
   profileFiles: z.object({
     resume: z.string(),
     profile: z.string(),

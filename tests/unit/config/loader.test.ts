@@ -24,4 +24,14 @@ describe('loadConfig', () => {
       ),
     ).rejects.toThrow()
   })
+
+  test('defaults notifySummaryIntervalMinutes to 30 when not set', async () => {
+    const { appConfigSchema } = await import('../../../src/config/schema.ts')
+    const config = appConfigSchema.parse({
+      mustCheckUrls: ['https://example.com'],
+      requirements: 'remote',
+      profileFiles: { resume: './resume.md', profile: './profile.json' },
+    })
+    expect(config.notifySummaryIntervalMinutes).toBe(30)
+  })
 })
