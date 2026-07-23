@@ -38,6 +38,14 @@ export const applications = pgTable('applications', {
   result: text('result'),
   screenshotPath: text('screenshot_path'),
   error: text('error'),
+  /** Set only on a failed row. 'missing_info' means the agent gave up because it
+   * lacked an answer for a specific on-page question (missingInfoQuestion holds
+   * that exact text) — /retry-failed-applications and the dashboard retry form
+   * can ask the human for it once and requeue. 'blocked'/null means a technical
+   * failure (crash, broken page, unexpected state) — not safely auto-retryable,
+   * surfaced as "apply manually" instead. */
+  failureReason: text('failure_reason', { enum: ['missing_info', 'blocked'] }),
+  missingInfoQuestion: text('missing_info_question'),
   /** Every question/answer pair the apply agent recorded while filling this
    * application, regardless of resolution path — the audit trail the daily
    * review dashboard reads. */

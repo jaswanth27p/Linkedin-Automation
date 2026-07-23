@@ -5,6 +5,7 @@ import { jobs, applications, searchRuns, answerReviews, careerPages, careerPageS
 import { getApplyQueueCounts } from '../queues/apply-queues.ts'
 import { getCurrentConfig } from '../config/current.ts'
 import { saveLearnedAnswer } from '../profile/loader.ts'
+import { retryWithAnswer } from '../queues/retry.ts'
 import { groupAnswersByQuestion, type ApplicationAnswers } from './review-data.ts'
 import { logger } from '../utils/logger.ts'
 import { filterUnreviewed, clusterQuestions, type ReviewedPair, type QuestionCluster } from './review-cluster.ts'
@@ -115,6 +116,7 @@ function page(body: string): Response {
     margin-bottom: 1rem;
   }
   .reference-block { color: var(--text-muted); font-size: 0.9rem; margin: 0.5rem 0; }
+  .table-toolbar { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
   .table-scroll { overflow-x: auto; }
   .table-scroll table { min-width: max-content; }
   .id-cell { font-family: ui-monospace, monospace; font-size: 0.8rem; color: var(--text-muted); }
@@ -164,6 +166,8 @@ async function renderApplications(): Promise<Response> {
       result: applications.result,
       screenshotPath: applications.screenshotPath,
       error: applications.error,
+      failureReason: applications.failureReason,
+      missingInfoQuestion: applications.missingInfoQuestion,
       answers: applications.answers,
       createdAt: applications.createdAt,
       jobTitle: jobs.title,
@@ -183,8 +187,22 @@ async function renderApplications(): Promise<Response> {
     .limit(200)
 
   const items = rows
-    .map(
-      (r) => `
+    .map((r) => {
+      const canRetry = r.status === 'failed' && r.failureReason === 'missing_info' && r.missingInfoQuestion
+      const action =
+        r.status !== 'failed'
+          ? ''
+          : canRetry
+            ? `<form method="post" action="/applications/retry">
+                 <input type="hidden" name="jobId" value="${escapeHtml(r.jobId)}" />
+                 <input type="hidden" name="question" value="${escapeHtml(r.missingInfoQuestion!)}" />
+                 <p class="reference-block">${escapeHtml(r.missingInfoQuestion!)}</p>
+                 <input type="text" name="answer" placeholder="answer" required />
+                 <button type="submit">Retry</button>
+               </form>`
+            : `<a href="${escapeHtml(r.applyUrl)}">Apply manually</a>`
+
+      return `
     <tr>
       <td class="id-cell">${escapeHtml(r.applicationId)}</td>
       <td class="id-cell">${escapeHtml(r.jobId)}</td>
@@ -204,13 +222,66 @@ async function renderApplications(): Promise<Response> {
       <td>${r.answers.length} answer(s)</td>
       <td>${r.createdAt?.toISOString() ?? ''}</td>
       <td>${r.jobUpdatedAt?.toISOString() ?? ''}</td>
-    </tr>`,
-    )
+      <td>${action}</td>
+    </tr>`
+    })
     .join('')
 
-  return page(
-    `<h1>Applications</h1><div class="table-scroll"><table><tr><th>App ID</th><th>Job ID</th><th>Job</th><th>Company</th><th>Location</th><th>Source</th><th>Apply Type</th><th>Apply URL</th><th>Source URL</th><th>Job Status</th><th>Relevance Reason</th><th>App Status</th><th>Result</th><th>Error</th><th>Screenshot Path</th><th>Answers</th><th>Applied At</th><th>Job Updated</th></tr>${items}</table></div>`,
-  )
+  const APP_STATUS_COL = 11
+
+  return page(`
+    <h1>Applications</h1>
+    <div class="table-toolbar">
+      <select id="statusFilter">
+        <option value="">All statuses</option>
+        <option value="applied">applied</option>
+        <option value="failed">failed</option>
+        <option value="needs_input">needs_input</option>
+      </select>
+      <input type="text" id="tableSearch" placeholder="Search..." />
+    </div>
+    <div class="table-scroll"><table id="appsTable"><thead><tr>
+      <th data-sort>App ID</th><th data-sort>Job ID</th><th data-sort>Job</th><th data-sort>Company</th><th data-sort>Location</th><th data-sort>Source</th><th data-sort>Apply Type</th><th>Apply URL</th><th>Source URL</th><th data-sort>Job Status</th><th data-sort>Relevance Reason</th><th data-sort>App Status</th><th data-sort>Result</th><th data-sort>Error</th><th data-sort>Screenshot Path</th><th data-sort>Answers</th><th data-sort>Applied At</th><th data-sort>Job Updated</th><th>Action</th>
+    </tr></thead><tbody>${items}</tbody></table></div>
+    <script>
+      (function () {
+        var table = document.getElementById('appsTable');
+        var tbody = table.tBodies[0];
+        var statusFilter = document.getElementById('statusFilter');
+        var search = document.getElementById('tableSearch');
+        var APP_STATUS_COL = ${APP_STATUS_COL};
+
+        Array.prototype.forEach.call(table.tHead.rows[0].cells, function (th, idx) {
+          if (!th.hasAttribute('data-sort')) return;
+          th.style.cursor = 'pointer';
+          var dir = 1;
+          th.addEventListener('click', function () {
+            var rows = Array.prototype.slice.call(tbody.rows);
+            rows.sort(function (a, b) {
+              var av = a.cells[idx].innerText.trim();
+              var bv = b.cells[idx].innerText.trim();
+              return av.localeCompare(bv, undefined, { numeric: true }) * dir;
+            });
+            dir *= -1;
+            rows.forEach(function (row) { tbody.appendChild(row); });
+          });
+        });
+
+        function applyFilters() {
+          var statusVal = statusFilter.value;
+          var searchVal = search.value.toLowerCase();
+          Array.prototype.forEach.call(tbody.rows, function (row) {
+            var matchesStatus = !statusVal || row.cells[APP_STATUS_COL].innerText.trim() === statusVal;
+            var matchesSearch = !searchVal || row.innerText.toLowerCase().indexOf(searchVal) !== -1;
+            row.style.display = matchesStatus && matchesSearch ? '' : 'none';
+          });
+        }
+
+        statusFilter.addEventListener('change', applyFilters);
+        search.addEventListener('input', applyFilters);
+      })();
+    </script>
+  `)
 }
 
 async function renderExternalJobs(): Promise<Response> {
@@ -485,10 +556,27 @@ async function handleFeedback(req: Request): Promise<Response> {
   return new Response(null, { status: 303, headers: { Location: '/review' } })
 }
 
+async function handleRetry(req: Request): Promise<Response> {
+  const form = await req.formData()
+  const jobId = String(form.get('jobId') ?? '')
+  const question = String(form.get('question') ?? '')
+  const answer = String(form.get('answer') ?? '')
+
+  if (!jobId || !question || !answer) {
+    return new Response('bad request', { status: 400 })
+  }
+
+  const config = getCurrentConfig()
+  await retryWithAnswer(jobId, question, answer, config.profileFiles.profile)
+
+  return new Response(null, { status: 303, headers: { Location: '/applications' } })
+}
+
 export async function handleRequest(req: Request): Promise<Response> {
   const url = new URL(req.url)
   if (req.method === 'GET' && url.pathname === '/') return renderSummary()
   if (req.method === 'GET' && url.pathname === '/applications') return renderApplications()
+  if (req.method === 'POST' && url.pathname === '/applications/retry') return handleRetry(req)
   if (req.method === 'GET' && url.pathname === '/external-jobs') return renderExternalJobs()
   if (req.method === 'GET' && url.pathname === '/review') return renderReview()
   if (req.method === 'POST' && url.pathname === '/review/generate') return handleGenerate()

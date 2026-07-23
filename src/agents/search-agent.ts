@@ -15,8 +15,14 @@ import { notify } from '../notify/notify.ts'
 import { noOpBrowserContextProcessor } from './no-op-browser-context-processor.ts'
 import { logger } from '../utils/logger.ts'
 import { isDevLogs } from '../utils/dev-mode.ts'
+import { loadResume, loadProfile } from '../profile/loader.ts'
+import { getCurrentConfig } from '../config/current.ts'
 
 const SEARCH_TAB = 'search' as const
+
+/** Minimum fraction of a page's jobs (new + already-seen, combined) that must be
+ * judged relevant for the agent to keep paginating this search URL. */
+const RELEVANCE_CONTINUE_THRESHOLD = 0.25
 
 /** Browser tools that actually hit LinkedIn over the network — these are the
  * ones we pace to stay under LinkedIn's automation-detection thresholds. Local
@@ -90,6 +96,10 @@ interface ScanRunContext {
   scanned: number
   queued: number
   externalSaved: number
+  /** Jobs judged (new or already-seen) on the CURRENT page/batch — reset per
+   * search URL and per page boundary, see computeRelevanceContinueDecision. */
+  pageScanned: number
+  pageRelevant: number
 }
 
 function formatToolArgs(args: unknown): string {
@@ -143,10 +153,9 @@ async function logSearchStep(
   }
 }
 
-/** Hard mid-page stop conditions only — abort or the per-run job cap. There is
- * no relevance-based bail: every job a configured search URL turns up gets
- * recorded, since the URL's own LinkedIn filters are trusted as the relevance
- * signal. Pure so it's testable. */
+/** Hard mid-page stop conditions only — abort or the per-run job cap. Runs
+ * regardless of any page's relevance ratio (see computeRelevanceContinueDecision
+ * for that separate, page-boundary check). Pure so it's testable. */
 export function computeMidPageContinueDecision(ctx: {
   scanned: number
   aborted: boolean
@@ -158,6 +167,19 @@ export function computeMidPageContinueDecision(ctx: {
   return true
 }
 
+/** Page-boundary gate: whether to keep paginating this search URL, based on
+ * what fraction of the page's jobs (new + already-seen) were relevant. An
+ * already-seen job counts via its stored status — see check-already-seen.
+ * Pure so it's testable. */
+export function computeRelevanceContinueDecision(ctx: {
+  pageScanned: number
+  pageRelevant: number
+  threshold: number
+}): boolean {
+  if (ctx.pageScanned === 0) return true
+  return ctx.pageRelevant / ctx.pageScanned >= ctx.threshold
+}
+
 function createCheckAlreadySeenTool(ctx: ScanRunContext) {
   return createTool({
     id: 'check-already-seen',
@@ -167,10 +189,15 @@ function createCheckAlreadySeenTool(ctx: ScanRunContext) {
     outputSchema: z.object({ seen: z.boolean() }),
     execute: async ({ jobId }) => {
       const db = getDb()
-      const rows = await db.select({ id: jobs.id }).from(jobs).where(eq(jobs.id, jobId))
+      const rows = await db.select({ id: jobs.id, status: jobs.status }).from(jobs).where(eq(jobs.id, jobId))
       const seen = rows.length > 0
       if (seen) {
         pushLog(SEARCH_TAB, `Skipping a job (id ${jobId}) — already recorded in an earlier run.`)
+        ctx.pageScanned++
+        // A previously skipped/failed job wasn't worth pursuing then either —
+        // doesn't count in this page's favor. Everything else (queued,
+        // external_saved, needs_input, applied, discovered) does.
+        if (rows[0].status !== 'skipped' && rows[0].status !== 'failed') ctx.pageRelevant++
       }
       return { seen }
     },
@@ -181,7 +208,7 @@ function createReportJobTool(ctx: ScanRunContext) {
   return createTool({
     id: 'report-job',
     description:
-      "Record a newly-found job (one check-already-seen did NOT flag as seen) and route it. Call this exactly once per new card. There is no relevance judgment to make — every new job a configured search URL surfaces gets recorded, since the search URL's own LinkedIn filters are the relevance signal. Returns whether to keep scanning (a hard rate-limit/abort check only, never a relevance decision).",
+      'Record your relevance verdict for a newly-found job (one check-already-seen did NOT flag as seen) and route it. Call this exactly once per new card. Returns whether to keep scanning (a hard rate-limit/abort check only, never a relevance decision — that\'s check-page-relevance-ratio\'s job).',
     inputSchema: z.object({
       jobId: z.string(),
       title: z.string(),
@@ -190,13 +217,16 @@ function createReportJobTool(ctx: ScanRunContext) {
       sourceUrl: z.string(),
       applyUrl: z.string(),
       applyType: z.enum(['easy', 'external']),
+      verdict: z.enum(['relevant', 'skip']),
+      reason: z.string(),
     }),
     outputSchema: z.object({ continue: z.boolean() }),
     execute: async (input) => {
       ctx.scanned++
+      ctx.pageScanned++
 
       const db = getDb()
-      const status = input.applyType === 'easy' ? 'queued' : 'external_saved'
+      const status = input.verdict === 'skip' ? 'skipped' : input.applyType === 'easy' ? 'queued' : 'external_saved'
       // .returning() tells us whether this insert actually happened (vs.
       // conflicting with an existing row) — only route on a real insert, so a
       // job already in the DB (e.g. the model skipped check-already-seen)
@@ -212,22 +242,28 @@ function createReportJobTool(ctx: ScanRunContext) {
           applyType: input.applyType,
           sourceUrl: input.sourceUrl,
           status,
+          relevanceReason: input.reason,
         })
         .onConflictDoNothing()
         .returning({ id: jobs.id })
 
-      if (inserted.length > 0) {
-        if (input.applyType === 'easy') {
-          ctx.queued++
-          await enqueueApplyJob(input.jobId)
-          pushLog(SEARCH_TAB, `Found "${input.title}" at ${input.company} (id ${input.jobId}) — added to the Easy Apply queue.`)
-        } else {
-          ctx.externalSaved++
-          notify({ kind: 'external-job-found', title: input.title, company: input.company, applyUrl: input.applyUrl })
-          pushLog(SEARCH_TAB, `Found "${input.title}" at ${input.company} (id ${input.jobId}) — external apply, saved and notified.`)
-        }
+      if (input.verdict === 'skip') {
+        pushLog(SEARCH_TAB, `Reviewed "${input.title}" at ${input.company} (id ${input.jobId}) — not relevant, skipped. Reason: ${input.reason}`)
       } else {
-        pushLog(SEARCH_TAB, `Found "${input.title}" at ${input.company} (id ${input.jobId}) — already recorded, not routed again.`)
+        ctx.pageRelevant++
+        if (inserted.length > 0) {
+          if (input.applyType === 'easy') {
+            ctx.queued++
+            await enqueueApplyJob(input.jobId)
+            pushLog(SEARCH_TAB, `Found "${input.title}" at ${input.company} (id ${input.jobId}) — added to the Easy Apply queue.`)
+          } else {
+            ctx.externalSaved++
+            notify({ kind: 'external-job-found', title: input.title, company: input.company, applyUrl: input.applyUrl })
+            pushLog(SEARCH_TAB, `Found "${input.title}" at ${input.company} (id ${input.jobId}) — external apply, saved and notified.`)
+          }
+        } else {
+          pushLog(SEARCH_TAB, `Found "${input.title}" at ${input.company} (id ${input.jobId}) — already recorded, not routed again.`)
+        }
       }
 
       const shouldContinue = computeMidPageContinueDecision({
@@ -237,6 +273,35 @@ function createReportJobTool(ctx: ScanRunContext) {
       })
       if (!shouldContinue && ctx.scanned >= ctx.maxJobsPerRun) {
         pushLog(SEARCH_TAB, `Reached the per-run limit of ${ctx.maxJobsPerRun} jobs — stopping this page to avoid overusing LinkedIn.`)
+      }
+      return { continue: shouldContinue }
+    },
+  })
+}
+
+function createCheckPageRelevanceRatioTool(ctx: ScanRunContext) {
+  return createTool({
+    id: 'check-page-relevance-ratio',
+    description:
+      "Call this once you've finished every card on the current page/batch, before loading more results (infinite scroll) or clicking a \"Next\" pagination control. Returns whether this search URL's result quality is still good enough to keep paginating, based on the fraction of this page's jobs (new + already-seen) that were relevant.",
+    inputSchema: z.object({}),
+    outputSchema: z.object({ continue: z.boolean() }),
+    execute: async () => {
+      const shouldContinue = computeRelevanceContinueDecision({
+        pageScanned: ctx.pageScanned,
+        pageRelevant: ctx.pageRelevant,
+        threshold: RELEVANCE_CONTINUE_THRESHOLD,
+      })
+      const pct = ctx.pageScanned === 0 ? 0 : Math.round((ctx.pageRelevant / ctx.pageScanned) * 100)
+      if (shouldContinue) {
+        pushLog(SEARCH_TAB, `Page relevance: ${ctx.pageRelevant}/${ctx.pageScanned} (${pct}%) — continuing to more results.`)
+        ctx.pageScanned = 0
+        ctx.pageRelevant = 0
+      } else {
+        pushLog(
+          SEARCH_TAB,
+          `Page relevance: ${ctx.pageRelevant}/${ctx.pageScanned} (${pct}%) — below the ${Math.round(RELEVANCE_CONTINUE_THRESHOLD * 100)}% threshold, stopping this search URL.`,
+        )
       }
       return { continue: shouldContinue }
     },
@@ -261,12 +326,23 @@ function createRequestHumanInputTool() {
 }
 
 export async function buildScanInstructions(): Promise<string> {
+  const config = getCurrentConfig()
+  const resume = await loadResume(config.profileFiles.resume)
+  const profile = await loadProfile(config.profileFiles.profile)
+
   return `
 You are a LinkedIn job search assistant operating a real, already-logged-in browser. The search URL
-you're given already encodes the user's own filters (keywords, location, date posted, etc.) — your
-job is purely to walk its results and record every NEW job you find. There is no relevance judgment to make:
-do not read a job's full description, do not weigh it against a resume or requirements — that step
-does not exist in this flow.
+you're given already encodes the user's own filters (keywords, location, date posted, etc.), but you
+still judge each NEW job's relevance yourself before recording it.
+
+Candidate resume:
+${resume}
+
+Candidate profile (structured):
+${JSON.stringify(profile, null, 2)}
+
+Hiring requirements to match against:
+${config.requirements}
 
 CRITICAL RULE: report-job is the ONLY way a job is recorded and routed. If you select a job and do
 NOT call report-job for it (because it wasn't already flagged seen), that job is silently lost.
@@ -291,36 +367,45 @@ Process the cards STRICTLY ONE AT A TIME, in order, without skipping ahead.
    true, do not read the detail pane at all — move straight to the next position in your traversal
    list (step 7). This matters: reading and reasoning about an already-seen card wastes effort for no
    benefit, since it will never be recorded again.
-5. If not seen: read just enough from the already-visible right-hand detail pane to fill in
-   report-job's fields — title, company, location, and whether the apply control says "Easy Apply"
-   (applyType "easy") or hands off to an external site (applyType "external", any other apply-button
-   label). Do not read the full job description — there is nothing to judge it against.
+5. If not seen: read the already-visible right-hand detail pane — title, company, location, whether
+   the apply control says "Easy Apply" (applyType "easy") or hands off to an external site (applyType
+   "external", any other apply-button label), and enough of the description to judge relevance. Judge
+   by substance, not literal title match: a job counts as relevant if its real responsibilities/stack
+   overlap meaningfully with the candidate's actual skills and experience, even if the title differs.
+   Still respect the requirements text's hard constraints (seniority, location, experience range).
 6. Call report-job with jobId, title, company, location, sourceUrl (the search results URL you were
    given), applyUrl (construct the canonical https://www.linkedin.com/jobs/view/<jobId>/ from the
-   jobId — you don't need to have navigated there), and applyType. Mandatory for every new card. This
-   call almost always returns continue: true — that's just a hard rate-limit/abort check. If it ever
-   returns continue: false, stop entirely: close this tab (browser_tabs action "close") and finish
-   your turn immediately.
+   jobId — you don't need to have navigated there), applyType, verdict ("relevant" or "skip"), and a
+   short reason. Mandatory for every new card, regardless of verdict — a "skip" verdict still needs to
+   be recorded so the job is never re-judged. This call's continue field almost always returns true —
+   that's just a hard rate-limit/abort check, never a relevance decision. If it ever returns
+   continue: false, stop entirely: close this tab (browser_tabs action "close") and finish your turn
+   immediately.
 7. Advance to the NEXT position in your traversal list (position 2, then 3, then 4, ...) and
    browser_click that card's ref to select it. This updates the right pane and the currentJobId in
    place, no page reload. Go back to step 3 for this newly-selected card. Do this for every remaining
    card on the page, one at a time, without stopping in between.
 8. Once you have handled every card that was in your step-2 traversal list (the whole page, not a
-   subset): take a fresh browser_snapshot. If the left-hand list now shows more cards than before
-   (LinkedIn infinite-scrolls more in), re-run step 2 to build a new traversal list starting after the
-   last card you already handled, and keep going from step 3. If instead there's a pagination control
-   at the bottom (e.g. a "Next"/page-number button), click it to load the next page of results in this
-   SAME tab, then start over from step 2 for the new page. If there is no more content and no
-   next-page control, close this tab (browser_tabs action "close") and finish your turn.
+   subset): if there is no more content and no next-page control, close this tab (browser_tabs action
+   "close") and finish your turn — no need to check relevance, there's nowhere left to go. Otherwise,
+   BEFORE loading more cards or clicking a "Next"/page-number control, call check-page-relevance-ratio.
+   If it returns continue: false, this search URL's results have dropped off too much — close this tab
+   (browser_tabs action "close") and finish your turn immediately, do NOT load more. If it returns
+   continue: true, proceed: take a fresh browser_snapshot; if the left-hand list now shows more cards
+   than before (LinkedIn infinite-scrolls more in), re-run step 2 to build a new traversal list starting
+   after the last card you already handled, and keep going from step 3; if instead there's a pagination
+   control, click it to load the next page of results in this SAME tab, then start over from step 2 for
+   the new page.
 9. If you hit a LinkedIn checkpoint, CAPTCHA, or any page that isn't the normal jobs search UI, call
    request-human-input with a clear question describing what you're stuck on, then wait for the
    answer before continuing.
 
 DO NOT STOP after just the first (auto-selected) card or after just one page. Finishing every card on
-a page, and continuing to the next page/scroll when there's more, is the default behavior — the ONLY
-things that legitimately end this search URL are: report-job returning continue: false (hard
-rate-limit/abort stop, can happen mid-page), running out of both cards and a next-page control, or
-getting stuck badly enough to need request-human-input.
+a page, and continuing to the next page/scroll when there's more and check-page-relevance-ratio allows
+it, is the default behavior — the ONLY things that legitimately end this search URL are: report-job
+returning continue: false (hard rate-limit/abort stop, can happen mid-page),
+check-page-relevance-ratio returning continue: false (this page's relevance dropped too low), running
+out of both cards and a next-page control, or getting stuck badly enough to need request-human-input.
 
 Notes / gotchas:
 - Selecting a card (browser_click) is paced the same as opening a page — there's an automatic,
@@ -376,6 +461,8 @@ async function runSearchUrlsInner(urls: string[]): Promise<SearchRunResult> {
     scanned: 0,
     queued: 0,
     externalSaved: 0,
+    pageScanned: 0,
+    pageRelevant: 0,
   }
 
   try {
@@ -391,6 +478,7 @@ async function runSearchUrlsInner(urls: string[]): Promise<SearchRunResult> {
       tools: {
         checkAlreadySeen: createCheckAlreadySeenTool(ctx),
         reportJob: createReportJobTool(ctx),
+        checkPageRelevanceRatio: createCheckPageRelevanceRatioTool(ctx),
         requestHumanInput: createRequestHumanInputTool(),
       },
     })
@@ -398,6 +486,11 @@ async function runSearchUrlsInner(urls: string[]): Promise<SearchRunResult> {
     const triedUrls: string[] = []
     for (const url of urls) {
       if (abort.signal.aborted) break
+
+      // Page-relevance counters are per search URL — a fresh URL starts with a
+      // clean slate regardless of how the previous one ended.
+      ctx.pageScanned = 0
+      ctx.pageRelevant = 0
 
       setAgentStatus(SEARCH_TAB, 'running', `scanning ${url}`)
       pushLog(SEARCH_TAB, `Scanning ${url}`)
