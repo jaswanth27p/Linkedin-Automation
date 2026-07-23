@@ -115,6 +115,9 @@ function page(body: string): Response {
     margin-bottom: 1rem;
   }
   .reference-block { color: var(--text-muted); font-size: 0.9rem; margin: 0.5rem 0; }
+  .table-scroll { overflow-x: auto; }
+  .table-scroll table { min-width: max-content; }
+  .id-cell { font-family: ui-monospace, monospace; font-size: 0.8rem; color: var(--text-muted); }
 </style>
 </head><body>
 <nav><a href="/">Summary</a><a href="/applications">Applications</a><a href="/external-jobs">External Jobs</a><a href="/review">Review</a><a href="/career-pages">Career Pages</a></nav>
@@ -155,12 +158,24 @@ async function renderApplications(): Promise<Response> {
   const db = getDb()
   const rows = await db
     .select({
+      applicationId: applications.id,
+      jobId: applications.jobId,
       status: applications.status,
+      result: applications.result,
+      screenshotPath: applications.screenshotPath,
+      error: applications.error,
       answers: applications.answers,
       createdAt: applications.createdAt,
       jobTitle: jobs.title,
       company: jobs.company,
+      location: jobs.location,
+      applyUrl: jobs.applyUrl,
+      applyType: jobs.applyType,
+      sourceUrl: jobs.sourceUrl,
       source: jobs.source,
+      jobStatus: jobs.status,
+      relevanceReason: jobs.relevanceReason,
+      jobUpdatedAt: jobs.updatedAt,
     })
     .from(applications)
     .innerJoin(jobs, eq(applications.jobId, jobs.id))
@@ -171,18 +186,30 @@ async function renderApplications(): Promise<Response> {
     .map(
       (r) => `
     <tr>
+      <td class="id-cell">${escapeHtml(r.applicationId)}</td>
+      <td class="id-cell">${escapeHtml(r.jobId)}</td>
       <td>${escapeHtml(r.jobTitle)}</td>
       <td>${escapeHtml(r.company)}</td>
+      <td>${escapeHtml(r.location ?? '')}</td>
       <td>${SOURCE_LABELS[r.source] ?? r.source}</td>
-      <td>${r.status}</td>
+      <td>${escapeHtml(r.applyType)}</td>
+      <td><a href="${escapeHtml(r.applyUrl)}">${escapeHtml(r.applyUrl)}</a></td>
+      <td><a href="${escapeHtml(r.sourceUrl)}">${escapeHtml(r.sourceUrl)}</a></td>
+      <td>${escapeHtml(r.jobStatus)}</td>
+      <td>${escapeHtml(r.relevanceReason ?? '')}</td>
+      <td>${escapeHtml(r.status)}</td>
+      <td>${escapeHtml(r.result ?? '')}</td>
+      <td>${escapeHtml(r.error ?? '')}</td>
+      <td>${escapeHtml(r.screenshotPath ?? '')}</td>
       <td>${r.answers.length} answer(s)</td>
       <td>${r.createdAt?.toISOString() ?? ''}</td>
+      <td>${r.jobUpdatedAt?.toISOString() ?? ''}</td>
     </tr>`,
     )
     .join('')
 
   return page(
-    `<h1>Applications</h1><table><tr><th>Job</th><th>Company</th><th>Source</th><th>Status</th><th>Answers</th><th>When</th></tr>${items}</table>`,
+    `<h1>Applications</h1><div class="table-scroll"><table><tr><th>App ID</th><th>Job ID</th><th>Job</th><th>Company</th><th>Location</th><th>Source</th><th>Apply Type</th><th>Apply URL</th><th>Source URL</th><th>Job Status</th><th>Relevance Reason</th><th>App Status</th><th>Result</th><th>Error</th><th>Screenshot Path</th><th>Answers</th><th>Applied At</th><th>Job Updated</th></tr>${items}</table></div>`,
   )
 }
 
@@ -190,11 +217,18 @@ async function renderExternalJobs(): Promise<Response> {
   const db = getDb()
   const rows = await db
     .select({
+      id: jobs.id,
       title: jobs.title,
       company: jobs.company,
+      location: jobs.location,
       applyUrl: jobs.applyUrl,
+      applyType: jobs.applyType,
+      sourceUrl: jobs.sourceUrl,
       source: jobs.source,
+      status: jobs.status,
+      relevanceReason: jobs.relevanceReason,
       createdAt: jobs.createdAt,
+      updatedAt: jobs.updatedAt,
     })
     .from(jobs)
     .where(eq(jobs.status, 'external_saved'))
@@ -205,17 +239,24 @@ async function renderExternalJobs(): Promise<Response> {
     .map(
       (r) => `
     <tr>
+      <td class="id-cell">${escapeHtml(r.id)}</td>
       <td>${escapeHtml(r.title)}</td>
       <td>${escapeHtml(r.company)}</td>
+      <td>${escapeHtml(r.location ?? '')}</td>
       <td>${SOURCE_LABELS[r.source] ?? r.source}</td>
+      <td>${escapeHtml(r.applyType)}</td>
       <td><a href="${escapeHtml(r.applyUrl)}">${escapeHtml(r.applyUrl)}</a></td>
+      <td><a href="${escapeHtml(r.sourceUrl)}">${escapeHtml(r.sourceUrl)}</a></td>
+      <td>${escapeHtml(r.status)}</td>
+      <td>${escapeHtml(r.relevanceReason ?? '')}</td>
       <td>${r.createdAt?.toISOString() ?? ''}</td>
+      <td>${r.updatedAt?.toISOString() ?? ''}</td>
     </tr>`,
     )
     .join('')
 
   return page(
-    `<h1>External Jobs</h1><table><tr><th>Job</th><th>Company</th><th>Source</th><th>Apply link</th><th>Found</th></tr>${items}</table>${
+    `<h1>External Jobs</h1><div class="table-scroll"><table><tr><th>Job ID</th><th>Job</th><th>Company</th><th>Location</th><th>Source</th><th>Apply Type</th><th>Apply URL</th><th>Source URL</th><th>Status</th><th>Relevance Reason</th><th>Found</th><th>Updated</th></tr>${items}</table></div>${
       rows.length === 0 ? '<p>No external jobs saved yet.</p>' : ''
     }`,
   )
@@ -225,11 +266,14 @@ async function renderCareerPages(): Promise<Response> {
   const db = getDb()
   const rows = await db
     .select({
+      id: careerPages.id,
       url: careerPages.url,
       label: careerPages.label,
       addedAt: careerPages.addedAt,
       lastCheckedAt: careerPages.lastCheckedAt,
+      totalScanned: sql<number>`coalesce(sum(${careerPageScans.scannedCount}), 0)`,
       relevantFound: sql<number>`coalesce(sum(${careerPageScans.relevantCount}), 0)`,
+      totalSkipped: sql<number>`coalesce(sum(${careerPageScans.skippedCount}), 0)`,
     })
     .from(careerPages)
     .leftJoin(careerPageScans, eq(careerPageScans.careerPageId, careerPages.id))
@@ -240,16 +284,20 @@ async function renderCareerPages(): Promise<Response> {
     .map(
       (r) => `
     <tr>
+      <td class="id-cell">${escapeHtml(r.id)}</td>
       <td>${escapeHtml(r.label)}</td>
       <td><a href="${escapeHtml(r.url)}">${escapeHtml(r.url)}</a></td>
+      <td>${r.addedAt?.toISOString() ?? ''}</td>
       <td>${r.lastCheckedAt?.toISOString() ?? 'never'}</td>
+      <td>${r.totalScanned}</td>
       <td>${r.relevantFound}</td>
+      <td>${r.totalSkipped}</td>
     </tr>`,
     )
     .join('')
 
   return page(
-    `<h1>Career Pages</h1><table><tr><th>Label</th><th>URL</th><th>Last checked</th><th>Relevant found (all time)</th></tr>${items}</table>${
+    `<h1>Career Pages</h1><div class="table-scroll"><table><tr><th>ID</th><th>Label</th><th>URL</th><th>Added</th><th>Last checked</th><th>Scanned (all time)</th><th>Relevant found (all time)</th><th>Skipped (all time)</th></tr>${items}</table></div>${
       rows.length === 0 ? '<p>No career pages tracked yet — use /add-career-url.</p>' : ''
     }`,
   )
