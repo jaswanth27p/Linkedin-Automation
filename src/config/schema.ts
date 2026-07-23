@@ -9,13 +9,10 @@ export const appConfigSchema = z.object({
   requirements: z.string().min(1),
   concurrency: z.number().positive().default(1),
   model: z.string().default('opencode-go/deepseek-v4-flash'),
+  notifySummaryIntervalMinutes: z.number().int().positive().default(30),
   profileFiles: z.object({
     resume: z.string(),
     profile: z.string(),
-    /** Absolute path to the résumé file (PDF/DOCX) to upload on apply forms.
-     * Optional — if unset, upload-resume falls back to asking the human to
-     * attach it manually. */
-    resumeFile: z.string().optional(),
   }),
   search: z.object({
     // Rate-limit guards to avoid tripping LinkedIn's automation defenses:
@@ -25,7 +22,12 @@ export const appConfigSchema = z.object({
     maxJobsPerRun: z.number().int().positive().default(25),
     minNavDelayMs: z.number().int().min(0).default(3000),
     maxNavDelayMs: z.number().int().min(0).default(8000),
-  }).default({ maxJobsPerRun: 25, minNavDelayMs: 3000, maxNavDelayMs: 8000 }),
+    /** Minimum pause between full /auto-on loop cycles (re-scanning the same
+     * configured URLs). Without this, loop mode reopens the same search
+     * results back-to-back nonstop — a real LinkedIn rate-limit/ban risk,
+     * unlike /auto-on interval which already waits the full interval. */
+    loopCooldownMs: z.number().int().min(60_000).default(300_000),
+  }).default({ maxJobsPerRun: 25, minNavDelayMs: 3000, maxNavDelayMs: 8000, loopCooldownMs: 300_000 }),
 })
 
 export type AppConfig = z.infer<typeof appConfigSchema>

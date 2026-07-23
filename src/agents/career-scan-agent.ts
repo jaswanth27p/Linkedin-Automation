@@ -11,7 +11,7 @@ import { jobs, careerPages, careerPageScans } from '../db/schema.ts'
 import { loadResume, loadProfile } from '../profile/loader.ts'
 import { appState, pushLog, setAgentStatus } from '../state/app-state.ts'
 import { waitForAnswer } from '../state/prompt-channel.ts'
-import { notify } from '../notify/notify.ts'
+import { recordExternalJobFound } from '../notify/summary-aggregator.ts'
 import { noOpBrowserContextProcessor } from './no-op-browser-context-processor.ts'
 import { getCurrentConfig } from '../config/current.ts'
 import { logger } from '../utils/logger.ts'
@@ -189,7 +189,7 @@ function createReportPostingVerdictTool(ctx: PageScanContext, sourceUrl: string)
           .returning({ id: jobs.id })
 
         if (inserted.length > 0) {
-          notify({ kind: 'external-job-found', title: input.title, company: input.company, applyUrl: input.applyUrl })
+          recordExternalJobFound()
           pushLog(CAREERS_TAB, `Reviewed "${input.title}" at ${input.company} — suitable. Saved and notified.`)
         } else {
           pushLog(CAREERS_TAB, `Reviewed "${input.title}" at ${input.company} — suitable, but already recorded from an earlier check.`)

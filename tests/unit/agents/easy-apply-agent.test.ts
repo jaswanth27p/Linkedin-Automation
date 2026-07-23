@@ -1,4 +1,4 @@
-import { describe, test, expect, afterAll } from 'bun:test'
+import { describe, test, expect, mock, beforeEach, afterAll } from 'bun:test'
 import { eq } from 'drizzle-orm'
 import { getDb, closeDb } from '../../../src/db/index.ts'
 import { jobs, applications } from '../../../src/db/schema.ts'
@@ -11,9 +11,31 @@ import {
   type SubmissionContext,
 } from '../../../src/agents/easy-apply-agent.ts'
 
-initAppState({ concurrency: 1, model: 'test', maxJobsPerRun: 25, minNavDelayMs: 3000, maxNavDelayMs: 8000 })
+initAppState({ concurrency: 1, model: 'test', maxJobsPerRun: 25, minNavDelayMs: 3000, maxNavDelayMs: 8000, loopCooldownMs: 300000 })
+
+// This file exercises createReportSubmissionTool/processEasyApplyJob's real
+// report-submission path unmocked, which now calls the real
+// recordEasyApplyResult() in summary-aggregator.ts — a module-level counter
+// that persists for the whole bun:test process. Left unmocked, that counter
+// leaks into tests/unit/notify/summary-aggregator.test.ts's zero-state
+// assumptions when both files run in the same process. mock.module() is
+// global/process-wide and not undone by mock.restore() (verified elsewhere in
+// this suite), so the mock is (re-)registered in beforeEach and the real
+// module is restored in afterAll via a uniquely query-suffixed specifier,
+// spread into a plain object (not the raw namespace object, which makes a
+// later re-registration go stale by one call).
+beforeEach(() => {
+  mock.module('../../../src/notify/summary-aggregator.ts', () => ({
+    recordEasyApplyResult: () => {},
+    recordExternalJobFound: () => {},
+  }))
+})
 
 afterAll(async () => {
+  const specifier = '../../../src/notify/summary-aggregator.ts?__restore_real_easy_apply_agent_test'
+  const real = await import(specifier)
+  mock.module('../../../src/notify/summary-aggregator.ts', () => ({ ...real }))
+
   await closeDb()
 })
 

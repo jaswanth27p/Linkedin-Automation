@@ -7,6 +7,7 @@ export type NotifyEvent =
   | { kind: 'external-job-found'; title: string; company: string; applyUrl: string }
   | { kind: 'needs-input'; tab: TabId; question: string }
   | { kind: 'easy-apply-result'; success: boolean; title: string; company: string; error?: string }
+  | { kind: 'summary'; easyApplied: number; easyFailed: number; externalFound: number; intervalMinutes: number }
 
 export interface BuiltNotification {
   title: string
@@ -43,6 +44,11 @@ export function buildNotification(event: NotifyEvent): BuiltNotification {
         message: event.success
           ? `${event.title} @ ${event.company}`
           : `${event.title} @ ${event.company} — ${event.error ?? 'unknown error'}`,
+      }
+    case 'summary':
+      return {
+        title: `Summary (last ${event.intervalMinutes}m)`,
+        message: `Easy Apply: ${event.easyApplied} applied, ${event.easyFailed} failed\nExternal jobs found: ${event.externalFound}`,
       }
   }
 }

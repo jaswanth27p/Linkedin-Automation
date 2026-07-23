@@ -25,9 +25,13 @@ describe('loadConfig', () => {
     ).rejects.toThrow()
   })
 
-  test('accepts an optional resumeFile path', async () => {
-    const config = await loadConfig('./linkedin-auto.config.ts')
-    // Not set in the tracked sample config — must not be required.
-    expect(config.profileFiles.resumeFile).toBeUndefined()
+  test('defaults notifySummaryIntervalMinutes to 30 when not set', async () => {
+    const { appConfigSchema } = await import('../../../src/config/schema.ts')
+    const config = appConfigSchema.parse({
+      mustCheckUrls: ['https://example.com'],
+      requirements: 'remote',
+      profileFiles: { resume: './resume.md', profile: './profile.json' },
+    })
+    expect(config.notifySummaryIntervalMinutes).toBe(30)
   })
 })

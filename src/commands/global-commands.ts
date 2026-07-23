@@ -63,7 +63,7 @@ export function registerGlobalCommands(): void {
   registerCommand({
     name: 'set',
     scope: 'global',
-    description: '/set <concurrency|model|maxJobsPerRun|minNavDelayMs|maxNavDelayMs> <value>',
+    description: '/set <concurrency|model|maxJobsPerRun|minNavDelayMs|maxNavDelayMs|loopCooldownMs> <value>',
     run: (ctx) => {
       const [key, ...rest] = ctx.args
       const value = rest.join(' ')
@@ -75,6 +75,7 @@ export function registerGlobalCommands(): void {
         maxJobsPerRun: { min: 1, integer: true },
         minNavDelayMs: { min: 0, integer: true },
         maxNavDelayMs: { min: 0, integer: true },
+        loopCooldownMs: { min: 60_000, integer: true },
       }
 
       if (key === 'model') {
@@ -101,7 +102,7 @@ export function registerGlobalCommands(): void {
       } else {
         pushLog(
           appState.activeTab,
-          `Unknown setting: ${key}. Use concurrency, model, maxJobsPerRun, minNavDelayMs, or maxNavDelayMs.`,
+          `Unknown setting: ${key}. Use concurrency, model, maxJobsPerRun, minNavDelayMs, maxNavDelayMs, or loopCooldownMs.`,
         )
         return
       }

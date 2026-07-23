@@ -11,14 +11,15 @@ function makeConfig(): AppConfig {
     requirements: 'placeholder',
     concurrency: 1,
     model: 'test',
+    notifySummaryIntervalMinutes: 30,
     profileFiles: { resume: './resume.md', profile: './profile.json' },
-    search: { maxJobsPerRun: 25, minNavDelayMs: 3000, maxNavDelayMs: 8000 },
+    search: { maxJobsPerRun: 25, minNavDelayMs: 3000, maxNavDelayMs: 8000, loopCooldownMs: 300000 },
   }
 }
 
 beforeEach(() => {
   clearRegistryForTest()
-  initAppState({ concurrency: 1, model: 'test', maxJobsPerRun: 25, minNavDelayMs: 3000, maxNavDelayMs: 8000 })
+  initAppState({ concurrency: 1, model: 'test', maxJobsPerRun: 25, minNavDelayMs: 3000, maxNavDelayMs: 8000, loopCooldownMs: 300000 })
   setCurrentConfig(makeConfig())
   registerSearchCommands()
 })

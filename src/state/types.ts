@@ -21,6 +21,8 @@ export interface Settings {
   /** Lower/upper bounds of the randomized pause after each browser navigation. */
   minNavDelayMs: number
   maxNavDelayMs: number
+  /** Minimum pause between full /auto-on loop cycles. */
+  loopCooldownMs: number
 }
 
 export interface AppState {
