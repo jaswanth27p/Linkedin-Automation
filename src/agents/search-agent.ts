@@ -11,7 +11,7 @@ import { jobs, searchRuns } from '../db/schema.ts'
 import { appState, pushLog, setAgentStatus } from '../state/app-state.ts'
 import { waitForAnswer } from '../state/prompt-channel.ts'
 import { enqueueApplyJob } from '../queues/apply-queues.ts'
-import { notify } from '../notify/notify.ts'
+import { recordExternalJobFound } from '../notify/summary-aggregator.ts'
 import { noOpBrowserContextProcessor } from './no-op-browser-context-processor.ts'
 import { logger } from '../utils/logger.ts'
 import { isDevLogs } from '../utils/dev-mode.ts'
@@ -258,7 +258,7 @@ function createReportJobTool(ctx: ScanRunContext) {
             pushLog(SEARCH_TAB, `Found "${input.title}" at ${input.company} (id ${input.jobId}) — added to the Easy Apply queue.`)
           } else {
             ctx.externalSaved++
-            notify({ kind: 'external-job-found', title: input.title, company: input.company, applyUrl: input.applyUrl })
+            recordExternalJobFound()
             pushLog(SEARCH_TAB, `Found "${input.title}" at ${input.company} (id ${input.jobId}) — external apply, saved and notified.`)
           }
         } else {

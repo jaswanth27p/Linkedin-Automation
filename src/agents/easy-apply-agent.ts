@@ -14,7 +14,7 @@ import { loadResume, loadProfile, saveLearnedAnswer } from '../profile/loader.ts
 import { findLearnedAnswer } from '../profile/answer-matching.ts'
 import { appState, pushLog, setAgentStatus } from '../state/app-state.ts'
 import { waitForAnswer } from '../state/prompt-channel.ts'
-import { notify } from '../notify/notify.ts'
+import { recordEasyApplyResult } from '../notify/summary-aggregator.ts'
 import { noOpBrowserContextProcessor } from './no-op-browser-context-processor.ts'
 import type { AppConfig } from '../config/schema.ts'
 import type { TabId } from '../state/types.ts'
@@ -95,8 +95,9 @@ export interface SubmissionContext {
 /** Shared by report-submission's non-recoverable branch and every fallback
  * failure path in processEasyApplyJob (thrown error, agent never reported,
  * missing-info retries exhausted) — one persisted shape, one log line (with
- * the apply URL, so it's actionable without opening the DB), one desktop
- * notification, one place a human can navigate from later via the dashboard. */
+ * the apply URL, so it's actionable without opening the DB), one recorded
+ * summary-notification count, one place a human can navigate from later via
+ * the dashboard. */
 async function writeFailedApplication(
   job: JobRecord,
   error: string,
@@ -116,7 +117,7 @@ async function writeFailedApplication(
   })
   await db.update(jobs).set({ status: 'failed', updatedAt: new Date() }).where(eq(jobs.id, job.id))
   pushLog(EASY_TAB, `Failed: ${job.title} @ ${job.company} (${job.applyUrl}) — ${error}`)
-  notify({ kind: 'easy-apply-result', success: false, title: job.title, company: job.company, error })
+  recordEasyApplyResult(false)
 }
 
 /** Exported so the answer-tracking flow can be tested directly against a fake
@@ -180,7 +181,7 @@ export function createReportSubmissionTool(job: JobRecord, browser: AgentBrowser
         })
         await db.update(jobs).set({ status: 'applied', updatedAt: new Date() }).where(eq(jobs.id, job.id))
         pushLog(EASY_TAB, `Applied: ${job.title} @ ${job.company}`)
-        notify({ kind: 'easy-apply-result', success: true, title: job.title, company: job.company })
+        recordEasyApplyResult(true)
         ctx.outcome = { success: true }
       } else if (input.reason === 'missing_info' && input.question) {
         // Don't persist yet — processEasyApplyJob asks the human for this exact
