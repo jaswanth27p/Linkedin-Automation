@@ -22,13 +22,102 @@ function page(body: string): Response {
   return new Response(
     `<!doctype html><html><head><meta charset="utf-8"><title>Application Review</title>
 <style>
-  body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 900px; }
-  table { border-collapse: collapse; width: 100%; }
-  td, th { border: 1px solid #ccc; padding: 6px 10px; text-align: left; }
-  nav a { margin-right: 1rem; }
-  fieldset { margin-bottom: 1rem; }
+  :root {
+    --bg: #f5f6f8;
+    --surface: #ffffff;
+    --border: #e1e4e8;
+    --text: #1f2328;
+    --text-muted: #57606a;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --danger: #b42318;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .page-container { max-width: 960px; margin: 0 auto; padding: 1.5rem 2rem 3rem; }
+  nav {
+    display: flex;
+    gap: 0.25rem;
+    padding: 0.75rem 2rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  nav a {
+    padding: 0.4rem 0.9rem;
+    border-radius: var(--radius);
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+  }
+  nav a:hover { background: var(--bg); color: var(--text); }
+  h1 { font-size: 1.5rem; margin: 0 0 1rem; }
+  section, fieldset {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+  fieldset { border: 1px solid var(--border); }
+  legend { font-weight: 600; padding: 0 0.4rem; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    background: var(--surface);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  th, td { padding: 0.55rem 0.8rem; text-align: left; border-bottom: 1px solid var(--border); }
+  th {
+    background: var(--bg);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-muted);
+    position: sticky;
+    top: 0;
+  }
+  tbody tr:nth-child(even) { background: #fafbfc; }
+  tbody tr:hover { background: #f0f4ff; }
+  a { color: var(--accent); }
+  button, input[type="submit"] {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    padding: 0.45rem 0.9rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  button:hover { background: var(--accent-hover); }
+  input[type="text"] {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.4rem 0.6rem;
+    font-size: 0.9rem;
+  }
+  .error-banner {
+    background: #fdecea;
+    border: 1px solid #f5b5ac;
+    color: var(--danger);
+    border-radius: var(--radius);
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+  }
+  .reference-block { color: var(--text-muted); font-size: 0.9rem; margin: 0.5rem 0; }
 </style>
-</head><body><nav><a href="/">Summary</a><a href="/applications">Applications</a><a href="/external-jobs">External Jobs</a><a href="/review">Review</a><a href="/career-pages">Career Pages</a></nav>${body}</body></html>`,
+</head><body>
+<nav><a href="/">Summary</a><a href="/applications">Applications</a><a href="/external-jobs">External Jobs</a><a href="/review">Review</a><a href="/career-pages">Career Pages</a></nav>
+<div class="page-container">${body}</div>
+</body></html>`,
     { headers: { 'Content-Type': 'text/html; charset=utf-8' } },
   )
 }
