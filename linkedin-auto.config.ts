@@ -20,6 +20,7 @@ export default {
     profile: "./profile.json",
   },
   model: "opencode-go/deepseek-v4-pro",
+  notifySummaryIntervalMinutes: 30,
   search: {
     // LinkedIn rate-limit guards. maxJobsPerRun caps job detail opens per run;
     // min/maxNavDelayMs bracket the randomized pause after each browser
