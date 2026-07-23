@@ -49,4 +49,28 @@ describe('buildNotification', () => {
     const built = buildNotification({ kind: 'easy-apply-result', success: false, title: 'Engineer', company: 'Acme' })
     expect(built.message).toBe('Engineer @ Acme — unknown error')
   })
+
+  test('summary reports all three counts and the interval in the title', () => {
+    const built = buildNotification({
+      kind: 'summary',
+      easyApplied: 2,
+      easyFailed: 1,
+      externalFound: 3,
+      intervalMinutes: 30,
+    })
+    expect(built.title).toBe('Summary (last 30m)')
+    expect(built.message).toBe('Easy Apply: 2 applied, 1 failed\nExternal jobs found: 3')
+    expect(built.openUrl).toBeUndefined()
+  })
+
+  test('summary renders zero counts on the side with no activity', () => {
+    const built = buildNotification({
+      kind: 'summary',
+      easyApplied: 0,
+      easyFailed: 0,
+      externalFound: 5,
+      intervalMinutes: 30,
+    })
+    expect(built.message).toBe('Easy Apply: 0 applied, 0 failed\nExternal jobs found: 5')
+  })
 })
