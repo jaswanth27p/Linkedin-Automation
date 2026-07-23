@@ -13,6 +13,7 @@ import { stopCareerCheckAndWait } from './agents/career-scan-agent.ts'
 import { stopEasyApplyWorker } from './queues/easy-apply-worker.ts'
 import { closeApplyQueues, getApplyQueueCounts } from './queues/apply-queues.ts'
 import { startDashboard, stopDashboard } from './dashboard/server.ts'
+import { startSummaryScheduler, stopSummaryScheduler } from './notify/summary-aggregator.ts'
 import { mountTui, destroyTui } from './tui/index.tsx'
 
 // Last-resort safety net: opentui owns the terminal once the TUI is mounted,
@@ -38,6 +39,7 @@ async function cleanup() {
   logger.info('Shutting down...')
   destroyTui()
   stopDashboard()
+  stopSummaryScheduler()
   stopLoginAutoVerify()
   // Stop all agents/processes in dependency order: the search agent first
   // (it's driving the browser directly, no queue to gate it), then the
@@ -97,6 +99,7 @@ async function main() {
   }
 
   startDashboard()
+  startSummaryScheduler(config.notifySummaryIntervalMinutes * 60_000)
 
   initAppState({
     concurrency: config.concurrency,
